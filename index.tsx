@@ -45,6 +45,8 @@ export class GdmLiveAudio extends LitElement {
   @state() isInputMuted = false;
   @state() isOutputMuted = false;
   @state() private outputVolume = 1;
+  @state() isVideoOn = false;
+  @state() isScreenOn = false;
 
   @state() private preferredTtsProvider = 'cartesia';
   @state() private preferredSttProvider = 'deepgram';
@@ -73,6 +75,13 @@ export class GdmLiveAudio extends LitElement {
   private sourceNode: AudioBufferSourceNode;
   private scriptProcessorNode: ScriptProcessorNode;
   private sources = new Set<AudioBufferSourceNode>();
+
+  private silenceCheckInterval: number | null = null;
+  private lastSpeechTime = 0;
+  private inputAnalyser: AnalyserNode | null = null;
+  private videoStream: MediaStream | null = null;
+  private videoFrameSender: number | null = null;
+  private localVideoEl: HTMLVideoElement | null = null;
 
   private aiVoices = {
     // Female Voices
@@ -345,6 +354,20 @@ export class GdmLiveAudio extends LitElement {
       font-family: sans-serif;
     }
 
+    #local-video {
+      position: absolute;
+      bottom: 20vh;
+      left: 20px;
+      width: 200px;
+      height: auto;
+      border-radius: 8px;
+      object-fit: cover;
+      display: none;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      z-index: 20;
+      transform: scaleX(-1);
+    }
+
     .controls {
       z-index: 10;
       position: absolute;
@@ -381,6 +404,11 @@ export class GdmLiveAudio extends LitElement {
       button.muted {
         background: rgba(200, 50, 50, 0.3);
         border-color: rgba(200, 50, 50, 0.5);
+      }
+
+      button.active {
+        background: rgba(50, 200, 50, 0.3);
+        border-color: rgba(50, 200, 50, 0.5);
       }
 
       button.record-button {
@@ -567,9 +595,9 @@ export class GdmLiveAudio extends LitElement {
 
                 this.updateStatus(statusMessage);
                 // Send response back to the model
-                // FIX: The property for tool responses should be `toolResponses`.
+                // FIX: Changed `toolResponses` to `toolOutputs` to match the expected API parameter name for tool call results.
                 this.session.sendRealtimeInput({
-                  toolResponses: [
+                  toolOutputs: [
                     {
                       functionResponse: {
                         name: functionCall.name,
@@ -582,9 +610,9 @@ export class GdmLiveAudio extends LitElement {
                 this.updateError(
                   `Error handling tool: ${(error as Error).message}`,
                 );
-                // FIX: The property for tool responses should be `toolResponses`.
+                // FIX: Changed `toolResponses` to `toolOutputs` to match the expected API parameter name for tool call results.
                 this.session.sendRealtimeInput({
-                  toolResponses: [
+                  toolOutputs: [
                     {
                       functionResponse: {
                         name: functionCall.name,
@@ -677,8 +705,8 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: {prebuiltVoiceConfig: {voiceName: this.activeAiVoice}},
-            // FIX: The property for the end of speech timeout should be `endOfSpeechTimeout`.
-            endOfSpeechTimeout: 3000, // Wait for 3 seconds of silence before responding.
+            // FIX: Renamed `endOfSpeechTimeout` to `endOfSpeechTimeoutMs` to match the expected API, which often uses a 'Ms' suffix for millisecond values.
+            endOfSpeechTimeoutMs: 3000, // Wait for 3 seconds of silence before responding.
             // languageCode: 'en-GB'
             interruptionConfig: {
               holdDurationMs: 500, // Wait 500ms of user speech before interrupting.
@@ -699,6 +727,33 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
   private updateError(msg: string) {
     this.error = msg;
     this.status = '';
+  }
+
+  private checkForSilence() {
+    if (!this.inputAnalyser || !this.isRecording) return;
+
+    const dataArray = new Uint8Array(this.inputAnalyser.frequencyBinCount);
+    this.inputAnalyser.getByteTimeDomainData(dataArray);
+
+    let sumSquares = 0.0;
+    for (const amplitude of dataArray) {
+      const normalized = (amplitude / 128.0) - 1.0;
+      sumSquares += normalized * normalized;
+    }
+    const rms = Math.sqrt(sumSquares / dataArray.length);
+
+    const silenceThreshold = 0.01; // This might need tuning
+    if (rms > silenceThreshold) {
+      this.lastSpeechTime = Date.now();
+    }
+
+    const silenceDuration = Date.now() - this.lastSpeechTime;
+    const silenceTimeout = 20000; // 20 seconds
+
+    if (silenceDuration > silenceTimeout) {
+      this.updateStatus('Disconnected due to 20s of inactivity.');
+      this.stopRecording();
+    }
   }
 
   private async startRecording() {
@@ -722,6 +777,15 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
         this.mediaStream,
       );
       this.sourceNode.connect(this.inputNode);
+
+      this.inputAnalyser = this.inputAudioContext.createAnalyser();
+      this.inputAnalyser.fftSize = 256;
+      this.sourceNode.connect(this.inputAnalyser);
+      this.lastSpeechTime = Date.now();
+      this.silenceCheckInterval = window.setInterval(
+        () => this.checkForSilence(),
+        500,
+      );
 
       const bufferSize = 256;
       this.scriptProcessorNode = this.inputAudioContext.createScriptProcessor(
@@ -758,6 +822,17 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
     this.updateStatus('Stopping recording...');
 
     this.isRecording = false;
+
+    if (this.silenceCheckInterval) {
+      clearInterval(this.silenceCheckInterval);
+      this.silenceCheckInterval = null;
+    }
+    this.inputAnalyser?.disconnect();
+    this.inputAnalyser = null;
+
+    if (this.isVideoOn || this.isScreenOn) {
+      this.stopVideoStream();
+    }
 
     if (this.scriptProcessorNode && this.sourceNode && this.inputAudioContext) {
       this.scriptProcessorNode.disconnect();
@@ -833,50 +908,126 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
     }
   }
 
-  private transcribeFromFile() {
-    this.shadowRoot?.querySelector<HTMLInputElement>('#file-input')?.click();
-  }
-
-  private readFileAsBase64(file: File): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const dataUrl = reader.result as string;
-        const base64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
-        resolve(base64);
-      };
-      reader.onerror = (error) => reject(error);
-      reader.readAsDataURL(file);
-    });
-  }
-
-  private async handleFileSelected(e: Event) {
-    const input = e.target as HTMLInputElement;
-    const file = input.files?.[0];
-
-    if (!file) return;
-
-    this.updateStatus('Transcribing audio file...');
-
-    try {
-      const base64String = await this.readFileAsBase64(file);
-      const result = await Voice.transcribe([this.preferredSttProvider], {
-        audioBytesBase64: base64String,
-      });
-
-      if (result && result.text) {
-        this.updateStatus(`Transcription: "${result.text}"`);
-        this.session.sendClientContent({
-          turns: [result.text],
-        });
-      } else {
-        this.updateError('Transcription failed: Empty result.');
-      }
-    } catch (error) {
-      this.updateError(`Error: ${(error as Error).message}`);
-    } finally {
-      input.value = '';
+  private async toggleVideo() {
+    if (this.isVideoOn) {
+      this.stopVideoStream();
+    } else {
+      if (this.isScreenOn) this.stopVideoStream();
+      this.startVideo();
     }
+  }
+
+  private async toggleScreenShare() {
+    if (this.isScreenOn) {
+      this.stopVideoStream();
+    } else {
+      if (this.isVideoOn) this.stopVideoStream();
+      this.startScreenShare();
+    }
+  }
+
+  private async startVideo() {
+    if (!this.isRecording) {
+      this.updateError('Please start the connection first.');
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({video: true});
+      this.setupVideoStream(stream, 'video');
+    } catch (err) {
+      console.error('Error starting video:', err);
+      this.updateError(`Error accessing camera: ${(err as Error).message}`);
+    }
+  }
+
+  private async startScreenShare() {
+    if (!this.isRecording) {
+      this.updateError('Please start the connection first.');
+      return;
+    }
+    try {
+      // Cast is needed because getDisplayMedia is not in all lib versions
+      const stream =
+        await (navigator.mediaDevices as any).getDisplayMedia({video: true});
+      this.setupVideoStream(stream, 'screen');
+    } catch (err) {
+      console.error('Error starting screen share:', err);
+      this.updateError(
+        `Error starting screen share: ${(err as Error).message}`,
+      );
+    }
+  }
+
+  private setupVideoStream(stream: MediaStream, type: 'video' | 'screen') {
+    this.videoStream = stream;
+    if (type === 'video') this.isVideoOn = true;
+    if (type === 'screen') this.isScreenOn = true;
+
+    this.localVideoEl =
+      this.shadowRoot?.querySelector<HTMLVideoElement>('#local-video');
+    if (this.localVideoEl) {
+      this.localVideoEl.srcObject = stream;
+      this.localVideoEl.style.display = 'block';
+    }
+
+    // Handle when user stops screen share from browser UI
+    stream.getVideoTracks()[0].onended = () => {
+      this.stopVideoStream();
+    };
+
+    this.videoFrameSender = window.setInterval(
+      () => this.sendVideoFrame(),
+      1000,
+    ); // 1 FPS
+  }
+
+  private stopVideoStream() {
+    if (this.videoFrameSender) {
+      clearInterval(this.videoFrameSender);
+      this.videoFrameSender = null;
+    }
+    if (this.videoStream) {
+      this.videoStream.getTracks().forEach((track) => track.stop());
+      this.videoStream = null;
+    }
+    if (this.localVideoEl) {
+      this.localVideoEl.srcObject = null;
+      this.localVideoEl.style.display = 'none';
+    }
+    this.isVideoOn = false;
+    this.isScreenOn = false;
+  }
+
+  private sendVideoFrame() {
+    if (
+      !this.videoStream ||
+      !this.session ||
+      !this.localVideoEl ||
+      this.localVideoEl.paused ||
+      this.localVideoEl.ended ||
+      this.localVideoEl.videoWidth === 0
+    ) {
+      return;
+    }
+
+    const canvas = document.createElement('canvas');
+    canvas.width = this.localVideoEl.videoWidth;
+    canvas.height = this.localVideoEl.videoHeight;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(this.localVideoEl, 0, 0, canvas.width, canvas.height);
+
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+    const base64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
+
+    // FIX: Changed `image` to `media` to use the generic parameter for sending media data, distinguishing content by mimeType.
+    this.session.sendRealtimeInput({
+      media: {
+        data: base64,
+        mimeType: 'image/jpeg',
+      },
+    });
   }
 
   render() {
@@ -1222,6 +1373,8 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               </div>
             `
           : ''}
+        
+        <video id="local-video" autoplay muted playsinline></video>
 
         <div class="controls">
           <button
@@ -1325,6 +1478,22 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                   <path
                     d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
                 </svg>`}
+          </button>
+          <button
+            @click=${this.toggleVideo}
+            class=${classMap({active: this.isVideoOn})}
+            aria-label=${this.isVideoOn ? 'Stop video' : 'Start video'}>
+            ${this.isVideoOn
+              ? html`<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l22 22"/><path d="M21 21H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h3m3-3h6l2 3h4a2 2 0 0 1 2 2v9.34m-7.72-2.06a4 4 0 1 1-5.56-5.56"/></svg>`
+              : html`<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z"></path><circle cx="12" cy="13" r="4"></circle></svg>`}
+          </button>
+           <button
+            @click=${this.toggleScreenShare}
+            class=${classMap({active: this.isScreenOn})}
+            aria-label=${this.isScreenOn ? 'Stop sharing' : 'Share screen'}>
+            ${this.isScreenOn
+              ? html`<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 1l22 22m-2-2H3a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h1m6 0h9a2 2 0 0 1 2 2v10m-5.4-1.4A5.5 5.5 0 0 0 12 18a5.5 5.5 0 0 0-4.6-2.4M8 12v-2m4 4v-4"/></svg>`
+              : html`<svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/><path d="M17 2l4 4-4 4"/><path d="M21 6H9"/></svg>`}
           </button>
         </div>
 
