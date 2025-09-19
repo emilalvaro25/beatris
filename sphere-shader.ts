@@ -30,8 +30,8 @@ vec3 calc( vec3 pos ) {
   vec3 dir = normalize( pos );
   vec3 p = dir + vec3( time, 0., 0. );
   return pos +
-    1. * inputData.x * inputData.y * dir * (.5 + .5 * sin(inputData.z * pos.x + time)) +
-    1. * outputData.x * outputData.y * dir * (.5 + .5 * sin(outputData.z * pos.y + time))
+    .2 * inputData.x * inputData.y * dir * (.5 + .5 * sin(inputData.z * pos.x + time)) +
+    .2 * outputData.x * outputData.y * dir * (.5 + .5 * sin(outputData.z * pos.y + time))
   ;
 }
 

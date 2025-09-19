@@ -9,7 +9,7 @@ import {GoogleGenAI, LiveServerMessage, Modality, Session, Type} from '@google/g
 import {LitElement, css, html} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {classMap} from 'lit/directives/class-map.js';
-import {McpConfig, initializeProviders} from './mcp';
+import {McpConfig, Voice, initializeProviders} from './mcp';
 import {createBlob, decode, decodeAudioData} from './utils';
 import './visual-3d';
 
@@ -337,7 +337,8 @@ export class GdmLiveAudio extends LitElement {
       }
 
       button[disabled] {
-        display: none;
+        opacity: 0.5;
+        cursor: not-allowed;
       }
     }
   `;
@@ -518,9 +519,9 @@ export class GdmLiveAudio extends LitElement {
 
                 this.updateStatus(statusMessage);
                 // Send response back to the model
-                // FIX: Corrected property `toolResponse` to `toolResponses` for sending tool responses.
+                // FIX: Corrected property `toolResponses` to `toolResponse` to conform to the `LiveSendRealtimeInputParameters` type.
                 this.session.sendRealtimeInput({
-                  toolResponses: [
+                  toolResponse: [
                     {
                       functionResponse: {
                         name: functionCall.name,
@@ -533,9 +534,9 @@ export class GdmLiveAudio extends LitElement {
                 this.updateError(
                   `Error handling tool: ${(error as Error).message}`,
                 );
-                // FIX: Corrected property `toolResponse` to `toolResponses` for sending tool responses.
+                // FIX: Corrected property `toolResponses` to `toolResponse` to conform to the `LiveSendRealtimeInputParameters` type.
                 this.session.sendRealtimeInput({
-                  toolResponses: [
+                  toolResponse: [
                     {
                       functionResponse: {
                         name: functionCall.name,
@@ -762,6 +763,52 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
     this.outputNode.gain.value = this.isOutputMuted ? 0 : 1;
   }
 
+  private transcribeFromFile() {
+    this.shadowRoot?.querySelector<HTMLInputElement>('#file-input')?.click();
+  }
+
+  private readFileAsBase64(file: File): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = reader.result as string;
+        const base64 = dataUrl.substring(dataUrl.indexOf(',') + 1);
+        resolve(base64);
+      };
+      reader.onerror = (error) => reject(error);
+      reader.readAsDataURL(file);
+    });
+  }
+
+  private async handleFileSelected(e: Event) {
+    const input = e.target as HTMLInputElement;
+    const file = input.files?.[0];
+
+    if (!file) return;
+
+    this.updateStatus('Transcribing audio file...');
+
+    try {
+      const base64String = await this.readFileAsBase64(file);
+      const result = await Voice.transcribe([this.preferredSttProvider], {
+        audioBytesBase64: base64String,
+      });
+
+      if (result && result.text) {
+        this.updateStatus(`Transcription: "${result.text}"`);
+        this.session.sendClientContent({
+          turns: [result.text],
+        });
+      } else {
+        this.updateError('Transcription failed: Empty result.');
+      }
+    } catch (error) {
+      this.updateError(`Error: ${(error as Error).message}`);
+    } finally {
+      input.value = '';
+    }
+  }
+
   render() {
     return html`
       <div>
@@ -785,6 +832,13 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
             </svg>
           </button>
         </div>
+
+        <input
+          id="file-input"
+          type="file"
+          style="display: none;"
+          accept="audio/*"
+          @change=${this.handleFileSelected} />
 
         ${this.isSettingsOpen
           ? html`
@@ -1159,6 +1213,27 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               fill="#000000"
               xmlns="http://www.w3.org/2000/svg">
               <rect x="0" y="0" width="100" height="100" rx="15" />
+            </svg>
+          </button>
+          <button
+            id="transcribeButton"
+            @click=${this.transcribeFromFile}
+            ?disabled=${this.isRecording}
+            aria-label="Transcribe from file">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round">
+              <path
+                d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
+              <polyline points="14 2 14 8 20 8"></polyline>
+              <circle cx="10.5" cy="16.5" r="1"></circle>
+              <path d="m11.5 16.5-2-1.5V12"></path>
             </svg>
           </button>
           <button
