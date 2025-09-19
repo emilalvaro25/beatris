@@ -15,6 +15,29 @@ type AudioFmt = 'audio/mpeg' | 'audio/wav' | 'audio/ogg' | string;
 type Secret = string;
 type URLString = string;
 
+export type McpConfig = {
+  cartesia: {apiKey: string};
+  elevenLabs: {apiKey: string; modelId: string};
+  coquiXtps: {baseUrl: string};
+  piper: {baseUrl: string; voice: string};
+  deepgram: {apiKey: string};
+  assemblyAi: {apiKey: string};
+  vosk: {baseUrl: string};
+  fasterWhisper: {baseUrl: string};
+  whatsApp: {apiKey: string; phoneId: string};
+  twilio: {apiKey: string; sid: string; from: string};
+  matrix: {apiKey: string; baseUrl: string};
+  mattermost: {apiKey: string; baseUrl: string};
+  pinecone: {apiKey: string; baseUrl: string};
+  weaviate: {apiKey: string; baseUrl: string};
+  faiss: {baseUrl: string};
+  qdrant: {baseUrl: string};
+  notion: {apiKey: string; dbId: string};
+  jsonMemory: {baseUrl: string};
+  openAi: {apiKey: string; model: string};
+  zapier: {apiKey: string};
+};
+
 namespace Contract {
   /* Voice / STT */
   export type VoiceCloneIn = {
@@ -1152,6 +1175,9 @@ class MCPRegistry {
         : true,
     );
   }
+  clear() {
+    this.providers.clear();
+  }
 }
 const registry = new MCPRegistry();
 
@@ -1339,185 +1365,116 @@ const Tools = {
   },
 };
 
-/* -------------------------------- 12) Wire up default providers (2 paid + 2 OSS per type) -------------------------------- */
+/* -------------------------------- 12) Dynamic Provider Initialization -------------------------------- */
+export function initializeProviders(config: McpConfig) {
+  registry.clear();
 
-/* Voice + STT */
-registry
-  .add(Cartesia({apiKey: 'CARTESIA_API_KEY'}))
-  .add(
-    ElevenLabs({
-      apiKey: 'ELEVEN_API_KEY',
-      extra: {model_id: 'eleven_multilingual_v2'},
-    }),
-  )
-  .add(CoquiXTTS({baseURL: 'http://localhost:8020'}))
-  .add(Piper({baseURL: 'http://localhost:5002', extra: {voice: 'en_US-amy-low'}}))
-  .add(Deepgram({apiKey: 'DEEPGRAM_API_KEY'}))
-  .add(AssemblyAI({apiKey: 'ASSEMBLYAI_API_KEY'}))
-  .add(Vosk({baseURL: 'http://localhost:8009'}))
-  .add(FasterWhisper({baseURL: 'http://localhost:8010'}));
+  // Voice + STT
+  if (config.cartesia.apiKey)
+    registry.add(Cartesia({apiKey: config.cartesia.apiKey}));
+  if (config.elevenLabs.apiKey)
+    registry.add(
+      ElevenLabs({
+        apiKey: config.elevenLabs.apiKey,
+        extra: {model_id: config.elevenLabs.modelId},
+      }),
+    );
+  if (config.coquiXtps.baseUrl)
+    registry.add(CoquiXTTS({baseURL: config.coquiXtps.baseUrl}));
+  if (config.piper.baseUrl)
+    registry.add(
+      Piper({baseURL: config.piper.baseUrl, extra: {voice: config.piper.voice}}),
+    );
+  if (config.deepgram.apiKey)
+    registry.add(Deepgram({apiKey: config.deepgram.apiKey}));
+  if (config.assemblyAi.apiKey)
+    registry.add(AssemblyAI({apiKey: config.assemblyAi.apiKey}));
+  if (config.vosk.baseUrl) registry.add(Vosk({baseURL: config.vosk.baseUrl}));
+  if (config.fasterWhisper.baseUrl)
+    registry.add(FasterWhisper({baseURL: config.fasterWhisper.baseUrl}));
 
-/* Messaging */
-registry
-  .add(
-    WhatsAppBusiness({
-      apiKey: 'GRAPH_TOKEN',
-      baseURL: 'https://graph.facebook.com',
-      extra: {phone_id: 'YOUR_PHONE_ID'},
-    }),
-  )
-  .add(
-    Twilio({
-      apiKey: 'TWILIO_AUTH_TOKEN',
-      extra: {sid: 'ACxxxxxxxx', from: '+1234567890'},
-    }),
-  )
-  .add(Matrix({apiKey: 'MATRIX_ACCESS_TOKEN', baseURL: 'https://matrix.example.org'}))
-  .add(Mattermost({apiKey: 'MATTERMOST_TOKEN', baseURL: 'http://localhost:8065'}));
+  // Messaging
+  if (config.whatsApp.apiKey && config.whatsApp.phoneId)
+    registry.add(
+      WhatsAppBusiness({
+        apiKey: config.whatsApp.apiKey,
+        extra: {phone_id: config.whatsApp.phoneId},
+      }),
+    );
+  if (config.twilio.apiKey && config.twilio.sid && config.twilio.from)
+    registry.add(
+      Twilio({
+        apiKey: config.twilio.apiKey,
+        extra: {sid: config.twilio.sid, from: config.twilio.from},
+      }),
+    );
+  if (config.matrix.apiKey && config.matrix.baseUrl)
+    registry.add(
+      Matrix({apiKey: config.matrix.apiKey, baseURL: config.matrix.baseUrl}),
+    );
+  if (config.mattermost.apiKey && config.mattermost.baseUrl)
+    registry.add(
+      Mattermost({
+        apiKey: config.mattermost.apiKey,
+        baseURL: config.mattermost.baseUrl,
+      }),
+    );
 
-/* DB */
-registry
-  .add(
-    Firestore({
-      apiKey: 'FIREBASE_OAUTH_BEARER',
-      baseURL: 'https://firestore.googleapis.com',
-      extra: {project: 'YOUR_PROJECT'},
-    }),
-  )
-  .add(PostgresNeon({db: {query: async (_sql: string, _p: any[]) => ({rows: [], rowCount: 0})}}))
-  .add(SQLite({db: {prepare: (_s: string) => ({all: (..._a: any[]) => [], run: (..._a: any[]) => ({changes: 1})})}}))
-  .add(PostgresLocal({db: {query: async (_sql: string, _p: any[]) => ({rows: [], rowCount: 0})}}));
+  // RAG
+  if (config.pinecone.apiKey && config.pinecone.baseUrl)
+    registry.add(
+      Pinecone({
+        apiKey: config.pinecone.apiKey,
+        baseURL: config.pinecone.baseUrl,
+      }),
+    );
+  if (config.weaviate.apiKey && config.weaviate.baseUrl)
+    registry.add(
+      WeaviateCloud({
+        apiKey: config.weaviate.apiKey,
+        baseURL: config.weaviate.baseUrl,
+      }),
+    );
+  if (config.faiss.baseUrl) registry.add(FAISS({baseURL: config.faiss.baseUrl}));
+  if (config.qdrant.baseUrl)
+    registry.add(Qdrant({baseURL: config.qdrant.baseUrl}));
 
-/* Storage */
-registry
-  .add(S3({apiKey: 'AWS_GATEWAY_TOKEN', baseURL: 'https://storage-gateway.example.com'}))
-  .add(FirebaseStorage({apiKey: 'FIREBASE_BEARER', baseURL: 'https://firebase-storage-gw.example.com'}))
-  .add(MinIO({baseURL: 'http://localhost:9001'}))
-  .add(LocalFS({baseURL: 'http://localhost:8787'}));
+  // Memory
+  if (config.notion.apiKey && config.notion.dbId)
+    registry.add(
+      NotionMemory({apiKey: config.notion.apiKey, extra: {db: config.notion.dbId}}),
+    );
+  if (config.jsonMemory.baseUrl)
+    registry.add(JSONMemory({baseURL: config.jsonMemory.baseUrl}));
 
-/* RAG */
-registry
-  .add(Pinecone({apiKey: 'PINECONE_API_KEY', baseURL: 'https://pinecone-gw.example.com'}))
-  .add(WeaviateCloud({apiKey: 'WEAVIATE_TOKEN', baseURL: 'https://weaviate-gw.example.com'}))
-  .add(FAISS({baseURL: 'http://localhost:8900'}))
-  .add(Qdrant({baseURL: 'http://localhost:6333'}));
+  // Tools
+  if (config.openAi.apiKey)
+    registry.add(
+      OpenAIFunctions({
+        apiKey: config.openAi.apiKey,
+        extra: {model: config.openAi.model, tools: []},
+      }),
+    );
+  if (config.zapier.apiKey)
+    registry.add(ZapierTools({apiKey: config.zapier.apiKey}));
+  
+  // Add providers that don't need config
+  registry.add(HTTPTool({}))
+  registry.add(LocalFunctions({extra: {fnTable: {ping: async (a: any) => ({ok: true, echo: a})}}}));
 
-/* Memory */
-registry
-  .add(NotionMemory({apiKey: 'NOTION_TOKEN', extra: {db: 'NOTION_DB_ID'}}))
-  .add(RedisMemory({db: {set: async () => {}, get: async () => null}}))
-  .add(SQLiteMemory({db: {prepare: (_: string) => ({run: (..._a: any[]) => ({}), get: (..._a: any[]) => undefined})}}))
-  .add(JSONMemory({baseURL: 'http://localhost:8787'}));
-
-/* Tools */
-registry
-  .add(
-    OpenAIFunctions({
-      apiKey: 'OPENAI_API_KEY',
-      extra: {model: 'gpt-4o-mini', tools: []},
-    }),
-  )
-  .add(ZapierTools({apiKey: 'ZAPIER_NLA_TOKEN'}))
-  .add(HTTPTool({}))
-  .add(LocalFunctions({extra: {fnTable: {ping: async (a: any) => ({ok: true, echo: a})}}}));
-
-/* -------------------------------- 13) Beatrice-Oriented Policies -------------------------------- */
-
-async function policyEnsureVoiceId() {
-  const cloned = await Voice.clone(['cartesia', 'elevenlabs', 'coqui-xtts'], {
-    audioUrls: ['https://example.com/reference-60s.mp3'],
-    voiceName: 'BossJo',
-  });
-  return cloned.voice_id;
+  // Add mock providers for DB/Storage as they are not configurable via UI
+  registry.add(PostgresNeon({db: {query: async (_sql: string, _p: any[]) => ({rows: [], rowCount: 0})}}))
+  registry.add(SQLite({db: {prepare: (_s: string) => ({all: (..._a: any[]) => [], run: (..._a: any[]) => ({changes: 1})})}}))
+  registry.add(PostgresLocal({db: {query: async (_sql: string, _p: any[]) => ({rows: [], rowCount: 0})}}));
+  registry.add(S3({apiKey: '', baseURL: ''}))
+  registry.add(FirebaseStorage({apiKey: '', baseURL: ''}))
+  registry.add(MinIO({baseURL: ''}))
+  registry.add(LocalFS({baseURL: ''}));
+  registry.add(RedisMemory({db: {set: async () => {}, get: async () => null}}))
+  registry.add(SQLiteMemory({db: {prepare: (_: string) => ({run: (..._a: any[]) => ({}), get: (..._a: any[]) => undefined})}}))
 }
 
-async function policySpeak(text: string, lang: Lang = 'nl-BE') {
-  const voice_id = await policyEnsureVoiceId();
-  return await Voice.speak(['cartesia', 'elevenlabs', 'piper', 'coqui-xtts'], {
-    text,
-    voice_id,
-    lang,
-    format: 'audio/mpeg',
-  });
-}
-
-async function policyTranscribe(audioUrl: string, lang: Lang = 'auto') {
-  return await Voice.transcribe(
-    ['deepgram', 'assemblyai', 'faster-whisper', 'vosk'],
-    {audioUrl, lang},
-  );
-}
-
-async function policyStoreTranscript(sessionId: string, text: string) {
-  await Memory.note(['redis-memory', 'sqlite-memory', 'json-memory'], {
-    scope: 'session',
-    key: `${sessionId}:transcript`,
-    value: text,
-    ttlSec: 86400,
-  });
-  await DB.exec(['postgres-neon', 'postgres-local', 'sqlite'], {
-    sql: 'INSERT INTO transcripts(session_id, text) VALUES ($1,$2)',
-    params: [sessionId, text],
-  });
-  await Storage.put(['s3', 'firebase-storage', 'minio', 'local-fs'], {
-    path: `transcripts/${sessionId}.txt`,
-    bytesBase64: btoa(text),
-    contentType: 'text/plain',
-    public: false,
-  });
-}
-
-async function policyRAGUpsert(docId: string, text: string) {
-  const emb = await RAG.embed(
-    ['pinecone', 'weaviate-cloud', 'faiss', 'qdrant'],
-    {texts: [text]},
-  );
-  await RAG.upsert(['pinecone', 'weaviate-cloud', 'faiss', 'qdrant'], {
-    ids: [docId],
-    vectors: emb.vectors,
-    metadata: [{docId}],
-    namespace: 'beatrice',
-  });
-}
-
-async function policyRAGSearch(query: string) {
-  const emb = await RAG.embed(
-    ['pinecone', 'weaviate-cloud', 'faiss', 'qdrant'],
-    {texts: [query]},
-  );
-  return await RAG.search(['pinecone', 'weaviate-cloud', 'faiss', 'qdrant'], {
-    queryVector: emb.vectors[0],
-    topK: 5,
-    namespace: 'beatrice',
-  });
-}
-
-async function policyToolCall(name: string, args: any) {
-  return await Tools.call(
-    ['openai-functions', 'zapier-nla', 'http-tool', 'local-fn'],
-    {
-      name,
-      args,
-      endpoint: args?.endpoint,
-      method: args?.method,
-      authHeader: args?.auth,
-    },
-  );
-}
-
-/* -------------------------------- 14) Exports for MCP server handlers -------------------------------- */
-/**
- * Expose on MCP:
- *  - voice.clone        -> policyEnsureVoiceId()
- *  - tts.speak          -> policySpeak(text, lang)
- *  - stt.transcribe     -> policyTranscribe(audioUrl, lang)
- *  - message.send       -> Messaging.send([...], {target, body})
- *  - db.exec            -> DB.exec([...], {sql, params} or {collection, docId, data})
- *  - storage.put/get    -> Storage.put / Storage.get
- *  - rag.embed/upsert/search -> RAG.embed / RAG.upsert / RAG.search
- *  - memory.note/read   -> Memory.note / Memory.read
- *  - tools.call         -> Tools.call([...], {name, args, endpoint, method})
- */
+/* -------------------------------- 13) Exports -------------------------------- */
 export {
   registry,
   Voice,

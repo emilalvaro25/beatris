@@ -9,9 +9,32 @@ import {GoogleGenAI, LiveServerMessage, Modality, Session, Type} from '@google/g
 import {LitElement, css, html} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {classMap} from 'lit/directives/class-map.js';
-import {Messaging, RAG, Memory} from './mcp';
+import {McpConfig, initializeProviders} from './mcp';
 import {createBlob, decode, decodeAudioData} from './utils';
 import './visual-3d';
+
+const initialMcpConfig: McpConfig = {
+  cartesia: {apiKey: ''},
+  elevenLabs: {apiKey: '', modelId: 'eleven_multilingual_v2'},
+  coquiXtps: {baseUrl: 'http://localhost:8020'},
+  piper: {baseUrl: 'http://localhost:5002', voice: 'en_US-amy-low'},
+  deepgram: {apiKey: ''},
+  assemblyAi: {apiKey: ''},
+  vosk: {baseUrl: 'http://localhost:8009'},
+  fasterWhisper: {baseUrl: 'http://localhost:8010'},
+  whatsApp: {apiKey: '', phoneId: ''},
+  twilio: {apiKey: '', sid: '', from: ''},
+  matrix: {apiKey: '', baseUrl: 'https://matrix.org'},
+  mattermost: {apiKey: '', baseUrl: 'http://localhost:8065'},
+  pinecone: {apiKey: '', baseUrl: ''},
+  weaviate: {apiKey: '', baseUrl: ''},
+  faiss: {baseUrl: 'http://localhost:8900'},
+  qdrant: {baseUrl: 'http://localhost:6333'},
+  notion: {apiKey: '', dbId: ''},
+  jsonMemory: {baseUrl: 'http://localhost:8787'},
+  openAi: {apiKey: '', model: 'gpt-4o-mini'},
+  zapier: {apiKey: ''},
+};
 
 @customElement('gdm-live-audio')
 export class GdmLiveAudio extends LitElement {
@@ -28,8 +51,11 @@ export class GdmLiveAudio extends LitElement {
   @state() private preferredRagProvider = 'pinecone';
   @state() private preferredMemProvider = 'redis-memory';
 
-  @state() private selectedAiVoice = 'Aoede';
-  @state() private activeAiVoice = 'Aoede';
+  @state() private selectedAiVoice = 'Kore';
+  @state() private activeAiVoice = 'Kore';
+
+  @state() private mcpConfig: McpConfig = initialMcpConfig;
+  private mcpConfigKey = 'gdm-mcp-config';
 
   private client: GoogleGenAI;
   private session: Session;
@@ -48,15 +74,23 @@ export class GdmLiveAudio extends LitElement {
   private sources = new Set<AudioBufferSourceNode>();
 
   private aiVoices = {
+    // Female Voices
     'Aoede': 'Aoede (Female)',
     'Thelxiepeia': 'Thelxiepeia (Female)',
     'Peisinoe': 'Peisinoe (Female)',
     'Aglaope': 'Aglaope (Female)',
+    'Kore': 'Kore (Female)',
+    'Ligeia': 'Ligeia (Female)',
+    'Molpe': 'Molpe (Female)',
+    'Parthenope': 'Parthenope (Female)',
+    'Leucosia': 'Leucosia (Female)',
+    'en-US-Standard-C': 'Standard C (Female)',
+    'en-US-Standard-E': 'Standard E (Female)',
+    // Male Voices
+    'Achelous': 'Achelous (Male)',
     'en-US-Standard-A': 'Standard A (Male)',
     'en-US-Standard-B': 'Standard B (Male)',
-    'en-US-Standard-C': 'Standard C (Female)',
     'en-US-Standard-D': 'Standard D (Male)',
-    'en-US-Standard-E': 'Standard E (Female)',
   };
 
   static styles = css`
@@ -111,8 +145,10 @@ export class GdmLiveAudio extends LitElement {
       padding: 24px;
       border-radius: 12px;
       width: 90%;
-      max-width: 500px;
+      max-width: 600px;
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
     }
 
     .settings-modal-header {
@@ -120,6 +156,7 @@ export class GdmLiveAudio extends LitElement {
       justify-content: space-between;
       align-items: center;
       margin-bottom: 20px;
+      flex-shrink: 0;
     }
 
     .settings-modal-header h2 {
@@ -136,6 +173,11 @@ export class GdmLiveAudio extends LitElement {
       line-height: 1;
     }
 
+    .settings-modal-body {
+      overflow-y: auto;
+      padding-right: 12px;
+    }
+
     .settings-modal-body h3 {
       margin-top: 24px;
       margin-bottom: 16px;
@@ -150,13 +192,36 @@ export class GdmLiveAudio extends LitElement {
       margin-top: 0;
     }
 
+    .setting-description,
+    .setting-description-small {
+      font-size: 0.85rem;
+      color: #9ca3af;
+      margin-top: -12px;
+      margin-bottom: 16px;
+      max-width: 90%;
+    }
+
+    .setting-description-small {
+      font-size: 0.8rem;
+      color: #6b7280;
+      margin-top: -8px;
+    }
+
     .setting {
       display: flex;
       justify-content: space-between;
       align-items: center;
       padding: 12px 0;
+      gap: 16px;
     }
 
+    .setting label,
+    .setting > span {
+      flex-shrink: 0;
+      color: #d1d5db;
+    }
+
+    .setting input,
     .setting select {
       background-color: #374151;
       color: white;
@@ -164,15 +229,42 @@ export class GdmLiveAudio extends LitElement {
       border-radius: 6px;
       padding: 8px 12px;
       font-size: 0.9rem;
+      width: 100%;
+      box-sizing: border-box;
     }
 
+    .setting input:focus,
     .setting select:focus {
       outline: none;
       border-color: #3b82f6;
       box-shadow: 0 0 0 2px #1e40af;
     }
 
+    .mcp-config-section details {
+      border: 1px solid #374151;
+      border-radius: 8px;
+      margin-bottom: 12px;
+      overflow: hidden;
+    }
+
+    .mcp-config-section summary {
+      padding: 12px;
+      cursor: pointer;
+      background-color: #2b3a4f;
+      font-weight: 500;
+    }
+
+    .mcp-config-section summary:hover {
+      background-color: #374151;
+    }
+
+    .mcp-config-section .details-content {
+      padding: 0 16px 16px 16px;
+      background-color: #1f2937;
+    }
+
     .settings-modal-footer {
+      flex-shrink: 0;
       display: flex;
       justify-content: flex-end;
       padding-top: 20px;
@@ -252,6 +344,18 @@ export class GdmLiveAudio extends LitElement {
 
   constructor() {
     super();
+    const savedConfig = localStorage.getItem(this.mcpConfigKey);
+    if (savedConfig) {
+      try {
+        this.mcpConfig = {
+          ...initialMcpConfig,
+          ...JSON.parse(savedConfig),
+        };
+      } catch (e) {
+        console.error('Failed to parse MCP config from localStorage', e);
+      }
+    }
+    initializeProviders(this.mcpConfig);
     this.initClient();
   }
 
@@ -272,7 +376,7 @@ export class GdmLiveAudio extends LitElement {
   }
 
   private async initSession() {
-    const model = 'gemini-2.5-flash';
+    const model = 'gemini-2.5-flash-preview-native-audio-dialog';
     // FIX: Use `Type` enum for schema definitions to conform to @google/genai types.
     const tools = [
       {
@@ -414,38 +518,34 @@ export class GdmLiveAudio extends LitElement {
 
                 this.updateStatus(statusMessage);
                 // Send response back to the model
-                // FIX: The `sendRealtimeInput` method expects tool responses to be wrapped in a `content` object that contains a `parts` array.
+                // FIX: Corrected property `toolResponse` to `toolResponses` for sending tool responses.
                 this.session.sendRealtimeInput({
-                  content: {
-                    parts: [
-                      {
-                        functionResponse: {
-                          name: functionCall.name,
-                          response: toolResponse,
-                        },
+                  toolResponses: [
+                    {
+                      functionResponse: {
+                        name: functionCall.name,
+                        response: toolResponse,
                       },
-                    ],
-                  },
+                    },
+                  ],
                 });
               } catch (error) {
                 this.updateError(
                   `Error handling tool: ${(error as Error).message}`,
                 );
-                // FIX: The `sendRealtimeInput` method expects tool responses to be wrapped in a `content` object that contains a `parts` array.
+                // FIX: Corrected property `toolResponse` to `toolResponses` for sending tool responses.
                 this.session.sendRealtimeInput({
-                  content: {
-                    parts: [
-                      {
-                        functionResponse: {
-                          name: functionCall.name,
-                          response: {
-                            success: false,
-                            error: (error as Error).message,
-                          },
+                  toolResponses: [
+                    {
+                      functionResponse: {
+                        name: functionCall.name,
+                        response: {
+                          success: false,
+                          error: (error as Error).message,
                         },
                       },
-                    ],
-                  },
+                    },
+                  ],
                 });
               }
               return;
@@ -637,7 +737,19 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
       this.activeAiVoice = this.selectedAiVoice;
       this.reset(); // Re-initialize session with new voice
     }
+    localStorage.setItem(this.mcpConfigKey, JSON.stringify(this.mcpConfig));
+    initializeProviders(this.mcpConfig);
     this.isSettingsOpen = false;
+  }
+
+  private handleConfigChange(provider: keyof McpConfig, field: string, value: string) {
+    this.mcpConfig = {
+      ...this.mcpConfig,
+      [provider]: {
+        ...(this.mcpConfig[provider] as any),
+        [field]: value,
+      },
+    };
   }
 
   private toggleInputMute() {
@@ -668,7 +780,7 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               stroke-linecap="round"
               stroke-linejoin="round">
               <path
-                d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.44,0.17-0.48,0.41L9.18,5.18C8.59,5.42,8.06,5.74,7.56,6.12L5.17,5.16C4.95,5.09,4.7,5.16,4.59,5.36L2.67,8.68 c-0.11,0.2-0.06,0.47,0.12,0.61l2.03,1.58C4.78,11.36,4.76,11.68,4.76,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.43,2.37 c0.04,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.48-0.41l0.43-2.37c0.59-0.24,1.12-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0.01,0.59-0.22l1.92-3.32c0.12-0.2,0.07-0.47-0.12-0.61L19.14,12.94z"></path>
+                d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.44,0.17-0.48,0.41L9.18,5.18C8.59,5.42,8.06,5.74,7.56,6.12L5.17,5.16C4.95,5.09,4.7,5.16,4.59,5.36L2.67,8.68 c-0.11,0.2-0.06,0.47,0.12,0.61l2.03,1.58C4.78,11.36,4.76,11.68,4.76,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.43,2.37 c0.04,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.48,0.41l0.43-2.37c0.59-0.24,1.12-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0.01,0.59-0.22l1.92-3.32c0.12-0.2,0.07-0.47-0.12-0.61L19.14,12.94z"></path>
               <circle cx="12" cy="12" r="3"></circle>
             </svg>
           </button>
@@ -691,6 +803,10 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                   </div>
                   <div class="settings-modal-body">
                     <h3>AI Voice Configuration</h3>
+                    <p class="setting-description">
+                      Controls Beatrice's primary voice, generated in real-time
+                      by Gemini.
+                    </p>
                     <div class="setting">
                       <span>Gemini Live Voice</span>
                       <select
@@ -707,6 +823,10 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                     </div>
 
                     <h3>Service Preferences (MCP)</h3>
+                    <p class="setting-description">
+                      Select preferred third-party providers for functions like
+                      messaging or knowledge search.
+                    </p>
                     <div class="setting">
                       <span>Text-to-Speech (TTS)</span>
                       <select
@@ -721,6 +841,10 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                         <option value="piper">Piper (OSS)</option>
                       </select>
                     </div>
+                    <p class="setting-description-small">
+                      Note: This is for tool functions that might need to speak,
+                      not for Beatrice's main voice.
+                    </p>
                     <div class="setting">
                       <span>Speech-to-Text (STT)</span>
                       <select
@@ -782,6 +906,182 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                         <option value="sqlite-memory">SQLite (OSS)</option>
                         <option value="json-memory">JSON File (OSS)</option>
                       </select>
+                    </div>
+
+                    <h3>MCP Provider Configuration</h3>
+                    <p class="setting-description">
+                      Enter API keys and other details for the selected
+                      third-party providers.
+                    </p>
+                    <div class="mcp-config-section">
+                      <details>
+                        <summary>TTS Providers</summary>
+                        <div class="details-content">
+                          <p class="setting-description-small" style="margin-top: 8px; margin-bottom: 16px; color: #9ca3af; max-width: 100%;">
+                            Text-to-Speech engines convert text into spoken audio, used by tools that need to generate voice output.
+                          </p>
+                          <div class="setting">
+                            <label for="cart-key">Cartesia API Key</label>
+                            <input id="cart-key" type="password" .value=${this.mcpConfig.cartesia.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('cartesia', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="el-key">ElevenLabs API Key</label>
+                            <input id="el-key" type="password" .value=${this.mcpConfig.elevenLabs.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('elevenLabs', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="el-model">ElevenLabs Model ID</label>
+                            <input id="el-model" type="text" .value=${this.mcpConfig.elevenLabs.modelId} @input=${(e: InputEvent) => this.handleConfigChange('elevenLabs', 'modelId', (e.target as HTMLInputElement).value)}>
+                          </div>
+                           <div class="setting">
+                            <label for="coqui-url">Coqui XTTS URL</label>
+                            <input id="coqui-url" type="text" .value=${this.mcpConfig.coquiXtps.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('coquiXtps', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., http://localhost:8020">
+                          </div>
+                          <div class="setting">
+                            <label for="piper-url">Piper URL</label>
+                            <input id="piper-url" type="text" .value=${this.mcpConfig.piper.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('piper', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., http://localhost:5002">
+                          </div>
+                        </div>
+                      </details>
+                      <details>
+                        <summary>STT Providers</summary>
+                        <div class="details-content">
+                          <p class="setting-description-small" style="margin-top: 8px; margin-bottom: 16px; color: #9ca3af; max-width: 100%;">
+                            Speech-to-Text services transcribe spoken audio into written text, essential for understanding voice commands.
+                          </p>
+                          <div class="setting">
+                            <label for="dg-key">Deepgram API Key</label>
+                            <input id="dg-key" type="password" .value=${this.mcpConfig.deepgram.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('deepgram', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="as-key">AssemblyAI API Key</label>
+                            <input id="as-key" type="password" .value=${this.mcpConfig.assemblyAi.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('assemblyAi', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                           <div class="setting">
+                            <label for="fw-url">FasterWhisper URL</label>
+                            <input id="fw-url" type="text" .value=${this.mcpConfig.fasterWhisper.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('fasterWhisper', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., http://localhost:8010">
+                          </div>
+                           <div class="setting">
+                            <label for="vosk-url">Vosk URL</label>
+                            <input id="vosk-url" type="text" .value=${this.mcpConfig.vosk.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('vosk', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., http://localhost:8009">
+                          </div>
+                        </div>
+                      </details>
+                       <details>
+                        <summary>Messaging Providers</summary>
+                        <div class="details-content">
+                           <p class="setting-description-small" style="margin-top: 8px; margin-bottom: 16px; color: #9ca3af; max-width: 100%;">
+                            Connect to platforms like WhatsApp or Twilio, allowing Beatrice to send messages on your behalf.
+                          </p>
+                          <div class="setting">
+                            <label for="wa-key">WhatsApp API Key</label>
+                            <input id="wa-key" type="password" .value=${this.mcpConfig.whatsApp.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('whatsApp', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                           <div class="setting">
+                            <label for="wa-phone">WhatsApp Phone ID</label>
+                            <input id="wa-phone" type="text" .value=${this.mcpConfig.whatsApp.phoneId} @input=${(e: InputEvent) => this.handleConfigChange('whatsApp', 'phoneId', (e.target as HTMLInputElement).value)}>
+                          </div>
+                           <div class="setting">
+                            <label for="tw-key">Twilio Auth Token</label>
+                            <input id="tw-key" type="password" .value=${this.mcpConfig.twilio.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('twilio', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="tw-sid">Twilio SID</label>
+                            <input id="tw-sid" type="text" .value=${this.mcpConfig.twilio.sid} @input=${(e: InputEvent) => this.handleConfigChange('twilio', 'sid', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="tw-from">Twilio From #</label>
+                            <input id="tw-from" type="text" .value=${this.mcpConfig.twilio.from} @input=${(e: InputEvent) => this.handleConfigChange('twilio', 'from', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="mx-key">Matrix Access Token</label>
+                            <input id="mx-key" type="password" .value=${this.mcpConfig.matrix.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('matrix', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="mx-url">Matrix Base URL</label>
+                            <input id="mx-url" type="text" .value=${this.mcpConfig.matrix.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('matrix', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., https://matrix.org">
+                          </div>
+                          <div class="setting">
+                            <label for="mm-key">Mattermost Access Token</label>
+                            <input id="mm-key" type="password" .value=${this.mcpConfig.mattermost.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('mattermost', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="mm-url">Mattermost Base URL</label>
+                            <input id="mm-url" type="text" .value=${this.mcpConfig.mattermost.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('mattermost', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., http://localhost:8065">
+                          </div>
+                        </div>
+                      </details>
+                      <details>
+                        <summary>RAG Providers</summary>
+                        <div class="details-content">
+                          <p class="setting-description-small" style="margin-top: 8px; margin-bottom: 16px; color: #9ca3af; max-width: 100%;">
+                            Retrieval-Augmented Generation (RAG) providers give Beatrice a knowledge base to search for specific, factual information.
+                          </p>
+                          <div class="setting">
+                            <label for="pc-key">Pinecone API Key</label>
+                            <input id="pc-key" type="password" .value=${this.mcpConfig.pinecone.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('pinecone', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                           <div class="setting">
+                            <label for="pc-url">Pinecone URL</label>
+                            <input id="pc-url" type="text" .value=${this.mcpConfig.pinecone.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('pinecone', 'baseUrl', (e.target as HTMLInputElement).value)}>
+                          </div>
+                           <div class="setting">
+                            <label for="wv-key">Weaviate API Key</label>
+                            <input id="wv-key" type="password" .value=${this.mcpConfig.weaviate.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('weaviate', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                           <div class="setting">
+                            <label for="wv-url">Weaviate URL</label>
+                            <input id="wv-url" type="text" .value=${this.mcpConfig.weaviate.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('weaviate', 'baseUrl', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="faiss-url">FAISS URL</label>
+                            <input id="faiss-url" type="text" .value=${this.mcpConfig.faiss.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('faiss', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., http://localhost:8900">
+                          </div>
+                          <div class="setting">
+                            <label for="qdrant-url">Qdrant URL</label>
+                            <input id="qdrant-url" type="text" .value=${this.mcpConfig.qdrant.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('qdrant', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., http://localhost:6333">
+                          </div>
+                        </div>
+                      </details>
+                      <details>
+                        <summary>Memory Providers</summary>
+                        <div class="details-content">
+                          <p class="setting-description-small" style="margin-top: 8px; margin-bottom: 16px; color: #9ca3af; max-width: 100%;">
+                            These services provide Beatrice with a long-term memory to recall facts, preferences, and past conversations.
+                          </p>
+                           <div class="setting">
+                            <label for="no-key">Notion API Key</label>
+                            <input id="no-key" type="password" .value=${this.mcpConfig.notion.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('notion', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                           <div class="setting">
+                            <label for="no-db">Notion DB ID</label>
+                            <input id="no-db" type="text" .value=${this.mcpConfig.notion.dbId} @input=${(e: InputEvent) => this.handleConfigChange('notion', 'dbId', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="json-url">JSON Memory URL</label>
+                            <input id="json-url" type="text" .value=${this.mcpConfig.jsonMemory.baseUrl} @input=${(e: InputEvent) => this.handleConfigChange('jsonMemory', 'baseUrl', (e.target as HTMLInputElement).value)} placeholder="e.g., http://localhost:8787">
+                          </div>
+                        </div>
+                      </details>
+                      <details>
+                        <summary>Tool/Function Providers</summary>
+                        <div class="details-content">
+                          <p class="setting-description-small" style="margin-top: 8px; margin-bottom: 16px; color: #9ca3af; max-width: 100%;">
+                            Connect to external services like Zapier or other AI models to dramatically extend Beatrice's capabilities.
+                          </p>
+                           <div class="setting">
+                            <label for="zap-key">Zapier API Key</label>
+                            <input id="zap-key" type="password" .value=${this.mcpConfig.zapier.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('zapier', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="openai-key">OpenAI API Key</label>
+                            <input id="openai-key" type="password" .value=${this.mcpConfig.openAi.apiKey} @input=${(e: InputEvent) => this.handleConfigChange('openAi', 'apiKey', (e.target as HTMLInputElement).value)}>
+                          </div>
+                          <div class="setting">
+                            <label for="openai-model">OpenAI Model</label>
+                            <input id="openai-model" type="text" .value=${this.mcpConfig.openAi.model} @input=${(e: InputEvent) => this.handleConfigChange('openAi', 'model', (e.target as HTMLInputElement).value)}>
+                          </div>
+                        </div>
+                      </details>
                     </div>
                   </div>
                   <div class="settings-modal-footer">
