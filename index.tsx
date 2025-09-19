@@ -15,6 +15,7 @@ export class GdmLiveAudio extends LitElement {
   @state() isRecording = false;
   @state() status = '';
   @state() error = '';
+  @state() private isSettingsOpen = false;
 
   private client: GoogleGenAI;
   private session: Session;
@@ -33,6 +34,134 @@ export class GdmLiveAudio extends LitElement {
   private sources = new Set<AudioBufferSourceNode>();
 
   static styles = css`
+    :host {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+    .header {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      padding: 16px;
+      display: flex;
+      justify-content: flex-end;
+      z-index: 20;
+    }
+
+    .settings-btn {
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: white;
+      border-radius: 50%;
+      width: 48px;
+      height: 48px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0;
+    }
+
+    .settings-btn:hover {
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .settings-modal-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.7);
+      z-index: 100;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .settings-modal {
+      background: #1f2937;
+      color: white;
+      padding: 24px;
+      border-radius: 12px;
+      width: 90%;
+      max-width: 500px;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+    }
+
+    .settings-modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .settings-modal-header h2 {
+      margin: 0;
+      font-size: 1.5rem;
+    }
+
+    .close-btn {
+      background: none;
+      border: none;
+      color: white;
+      font-size: 2rem;
+      cursor: pointer;
+      line-height: 1;
+    }
+
+    .setting {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 12px 0;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #4b5563;
+      transition: 0.4s;
+      border-radius: 34px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: '';
+      height: 26px;
+      width: 26px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: 0.4s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: #3b82f6;
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(26px);
+    }
+
     #status {
       position: absolute;
       bottom: 5vh;
@@ -40,6 +169,8 @@ export class GdmLiveAudio extends LitElement {
       right: 0;
       z-index: 10;
       text-align: center;
+      color: white;
+      font-family: sans-serif;
     }
 
     .controls {
@@ -101,6 +232,17 @@ export class GdmLiveAudio extends LitElement {
 
   private async initSession() {
     const model = 'gemini-2.5-flash-preview-native-audio-dialog';
+    const tools = [
+      {
+        functionDeclarations: [
+          {
+            name: 'get_current_time',
+            description:
+              'Get the current time to answer time-related questions.',
+          },
+        ],
+      },
+    ];
 
     try {
       this.session = await this.client.live.connect({
@@ -110,6 +252,26 @@ export class GdmLiveAudio extends LitElement {
             this.updateStatus('Opened');
           },
           onmessage: async (message: LiveServerMessage) => {
+            const functionCall =
+              message.serverContent?.modelTurn?.parts[0]?.functionCall;
+
+            if (functionCall) {
+              if (functionCall.name === 'get_current_time') {
+                this.updateStatus('Beatrice is checking the time...');
+                const currentTime = new Date().toLocaleTimeString();
+                // FIX: `functionResponse` is not a valid top-level property. It should be wrapped in a `toolResponse` object.
+                this.session.sendRealtimeInput({
+                  toolResponse: {
+                    functionResponse: {
+                      name: 'get_current_time',
+                      response: {time: currentTime},
+                    },
+                  },
+                });
+              }
+              return;
+            }
+
             const audio =
               message.serverContent?.modelTurn?.parts[0]?.inlineData;
 
@@ -154,6 +316,7 @@ export class GdmLiveAudio extends LitElement {
           },
         },
         config: {
+          tools,
           systemInstruction: {
             parts: [
               {
@@ -196,10 +359,12 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
 
   private updateStatus(msg: string) {
     this.status = msg;
+    this.error = '';
   }
 
   private updateError(msg: string) {
     this.error = msg;
+    this.status = '';
   }
 
   private async startRecording() {
@@ -282,9 +447,74 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
     this.updateStatus('Session cleared.');
   }
 
+  private openSettings() {
+    this.isSettingsOpen = true;
+  }
+
+  private closeSettings() {
+    this.isSettingsOpen = false;
+  }
+
   render() {
     return html`
       <div>
+        <div class="header">
+          <button
+            class="settings-btn"
+            @click=${this.openSettings}
+            aria-label="Open Settings">
+            <svg
+              width="24"
+              height="24"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round">
+              <path
+                d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.44,0.17-0.48,0.41L9.18,5.18C8.59,5.42,8.06,5.74,7.56,6.12L5.17,5.16C4.95,5.09,4.7,5.16,4.59,5.36L2.67,8.68 c-0.11,0.2-0.06,0.47,0.12,0.61l2.03,1.58C4.78,11.36,4.76,11.68,4.76,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.43,2.37 c0.04,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.48-0.41l0.43-2.37c0.59-0.24,1.12-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0.01,0.59-0.22l1.92-3.32c0.12-0.2,0.07-0.47-0.12-0.61L19.14,12.94z"></path>
+              <circle cx="12" cy="12" r="3"></circle>
+            </svg>
+          </button>
+        </div>
+
+        ${this.isSettingsOpen
+          ? html`
+              <div class="settings-modal-overlay" @click=${this.closeSettings}>
+                <div
+                  class="settings-modal"
+                  @click=${(e: Event) => e.stopPropagation()}>
+                  <div class="settings-modal-header">
+                    <h2>Settings (MCP Integration)</h2>
+                    <button
+                      class="close-btn"
+                      @click=${this.closeSettings}
+                      aria-label="Close Settings">
+                      &times;
+                    </button>
+                  </div>
+                  <div class="settings-modal-body">
+                    <div class="setting">
+                      <span>Enable Advanced Features</span>
+                      <label class="switch">
+                        <input type="checkbox" />
+                        <span class="slider"></span>
+                      </label>
+                    </div>
+                    <div class="setting">
+                      <span>Another Setting</span>
+                      <label class="switch">
+                        <input type="checkbox" checked />
+                        <span class="slider"></span>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            `
+          : ''}
+
         <div class="controls">
           <button
             id="resetButton"
@@ -328,7 +558,7 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
           </button>
         </div>
 
-        <div id="status"> ${this.error} </div>
+        <div id="status">${this.error || this.status}</div>
         <gdm-live-audio-visuals-3d
           .inputNode=${this.inputNode}
           .outputNode=${this.outputNode}></gdm-live-audio-visuals-3d>
