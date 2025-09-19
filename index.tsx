@@ -44,6 +44,7 @@ export class GdmLiveAudio extends LitElement {
   @state() private isSettingsOpen = false;
   @state() isInputMuted = false;
   @state() isOutputMuted = false;
+  @state() private outputVolume = 1;
 
   @state() private preferredTtsProvider = 'cartesia';
   @state() private preferredSttProvider = 'deepgram';
@@ -341,6 +342,56 @@ export class GdmLiveAudio extends LitElement {
         cursor: not-allowed;
       }
     }
+
+    .volume-control-container {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      border-radius: 12px;
+      padding-right: 16px;
+    }
+
+    .volume-control-container button {
+      border: none;
+      background: transparent;
+    }
+
+    .volume-slider {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 100px;
+      height: 6px;
+      background: rgba(255, 255, 255, 0.3);
+      border-radius: 3px;
+      outline: none;
+      opacity: 0.8;
+      transition: opacity 0.2s;
+    }
+
+    .volume-slider:hover {
+      opacity: 1;
+    }
+
+    .volume-slider::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 18px;
+      height: 18px;
+      background: #ffffff;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+
+    .volume-slider::-moz-range-thumb {
+      width: 18px;
+      height: 18px;
+      background: #ffffff;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+    }
   `;
 
   constructor() {
@@ -519,9 +570,9 @@ export class GdmLiveAudio extends LitElement {
 
                 this.updateStatus(statusMessage);
                 // Send response back to the model
-                // FIX: Corrected property `toolResponses` to `toolResponse` to conform to the `LiveSendRealtimeInputParameters` type.
+                // FIX: Corrected property `toolResponse` to `toolResponses` to conform to the `LiveSendRealtimeInputParameters` type.
                 this.session.sendRealtimeInput({
-                  toolResponse: [
+                  toolResponses: [
                     {
                       functionResponse: {
                         name: functionCall.name,
@@ -534,9 +585,9 @@ export class GdmLiveAudio extends LitElement {
                 this.updateError(
                   `Error handling tool: ${(error as Error).message}`,
                 );
-                // FIX: Corrected property `toolResponses` to `toolResponse` to conform to the `LiveSendRealtimeInputParameters` type.
+                // FIX: Corrected property `toolResponse` to `toolResponses` to conform to the `LiveSendRealtimeInputParameters` type.
                 this.session.sendRealtimeInput({
-                  toolResponse: [
+                  toolResponses: [
                     {
                       functionResponse: {
                         name: functionCall.name,
@@ -758,9 +809,26 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
     this.inputNode.gain.value = this.isInputMuted ? 0 : 1;
   }
 
+  private handleVolumeChange(e: Event) {
+    const newVolume = parseFloat((e.target as HTMLInputElement).value);
+    this.outputVolume = newVolume;
+    // Moving the slider always affects the live volume and unmutes if necessary
+    this.outputNode.gain.value = newVolume;
+    this.isOutputMuted = newVolume === 0;
+  }
+
   private toggleOutputMute() {
     this.isOutputMuted = !this.isOutputMuted;
-    this.outputNode.gain.value = this.isOutputMuted ? 0 : 1;
+    if (this.isOutputMuted) {
+      // Mute: set gain to 0, but preserve outputVolume
+      this.outputNode.gain.value = 0;
+    } else {
+      // Unmute: restore volume. If it was 0, set to a default.
+      if (this.outputVolume === 0) {
+        this.outputVolume = 0.75;
+      }
+      this.outputNode.gain.value = this.outputVolume;
+    }
   }
 
   private transcribeFromFile() {
@@ -1236,42 +1304,54 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               <path d="m11.5 16.5-2-1.5V12"></path>
             </svg>
           </button>
-          <button
-            @click=${this.toggleOutputMute}
-            class=${classMap({muted: this.isOutputMuted})}
-            aria-label=${this.isOutputMuted
-              ? 'Unmute speaker'
-              : 'Mute speaker'}>
-            ${this.isOutputMuted
-              ? html`<svg
-                  width="26"
-                  height="26"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round">
-                  <polygon
-                    points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                  <line x1="23" y1="9" x2="17" y2="15"></line>
-                  <line x1="17" y1="9" x2="23" y2="15"></line>
-                </svg>`
-              : html`<svg
-                  width="26"
-                  height="26"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round">
-                  <polygon
-                    points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                  <path
-                    d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                </svg>`}
-          </button>
+          <div class="volume-control-container">
+            <button
+              @click=${this.toggleOutputMute}
+              class=${classMap({muted: this.isOutputMuted})}
+              aria-label=${this.isOutputMuted
+                ? 'Unmute speaker'
+                : 'Mute speaker'}>
+              ${this.isOutputMuted
+                ? html`<svg
+                    width="26"
+                    height="26"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <polygon
+                      points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <line x1="23" y1="9" x2="17" y2="15"></line>
+                    <line x1="17" y1="9" x2="23" y2="15"></line>
+                  </svg>`
+                : html`<svg
+                    width="26"
+                    height="26"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2"
+                    stroke-linecap="round"
+                    stroke-linejoin="round">
+                    <polygon
+                      points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                    <path
+                      d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                  </svg>`}
+            </button>
+            <input
+              type="range"
+              min="0"
+              max="1"
+              step="0.01"
+              .value=${String(this.outputVolume)}
+              @input=${this.handleVolumeChange}
+              class="volume-slider"
+              aria-label="Volume control"
+            />
+          </div>
           <button
             id="resetButton"
             @click=${this.reset}
