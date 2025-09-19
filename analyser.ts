@@ -12,7 +12,8 @@ export class Analyser {
 
   constructor(node: AudioNode) {
     this.analyser = node.context.createAnalyser();
-    this.analyser.fftSize = 32;
+    this.analyser.fftSize = 256;
+    this.analyser.smoothingTimeConstant = 0.7;
     this.bufferLength = this.analyser.frequencyBinCount;
     this.dataArray = new Uint8Array(this.bufferLength);
     node.connect(this.analyser);
