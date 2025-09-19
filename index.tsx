@@ -147,6 +147,7 @@ export class GdmLiveAudio extends LitElement {
       border-radius: 12px;
       width: 90%;
       max-width: 600px;
+      max-height: 90vh;
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
       display: flex;
       flex-direction: column;
@@ -241,6 +242,51 @@ export class GdmLiveAudio extends LitElement {
       box-shadow: 0 0 0 2px #1e40af;
     }
 
+    .setting input[type='range'] {
+      -webkit-appearance: none;
+      appearance: none;
+      height: 8px;
+      background: #4b5563;
+      border-radius: 4px;
+      outline: none;
+      padding: 0;
+      border: none;
+      transition: background 0.2s;
+    }
+
+    .setting input[type='range']:focus {
+      box-shadow: none;
+    }
+
+    .setting input[type='range']::-webkit-slider-thumb {
+      -webkit-appearance: none;
+      appearance: none;
+      width: 20px;
+      height: 20px;
+      background: #d1d5db;
+      border-radius: 50%;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+
+    .setting input[type='range']::-webkit-slider-thumb:hover {
+      background: #ffffff;
+    }
+
+    .setting input[type='range']::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      background: #d1d5db;
+      border-radius: 50%;
+      cursor: pointer;
+      border: none;
+      transition: background 0.2s;
+    }
+
+    .setting input[type='range']::-moz-range-thumb:hover {
+      background: #ffffff;
+    }
+
     .mcp-config-section details {
       border: 1px solid #374151;
       border-radius: 8px;
@@ -309,7 +355,7 @@ export class GdmLiveAudio extends LitElement {
       align-items: center;
       justify-content: center;
       flex-direction: row;
-      gap: 10px;
+      gap: 20px;
 
       button {
         outline: none;
@@ -337,60 +383,11 @@ export class GdmLiveAudio extends LitElement {
         border-color: rgba(200, 50, 50, 0.5);
       }
 
-      button[disabled] {
-        opacity: 0.5;
-        cursor: not-allowed;
+      button.record-button {
+        width: 64px;
+        height: 64px;
+        border-radius: 50%;
       }
-    }
-
-    .volume-control-container {
-      display: flex;
-      align-items: center;
-      gap: 8px;
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      border-radius: 12px;
-      padding-right: 16px;
-    }
-
-    .volume-control-container button {
-      border: none;
-      background: transparent;
-    }
-
-    .volume-slider {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 100px;
-      height: 6px;
-      background: rgba(255, 255, 255, 0.3);
-      border-radius: 3px;
-      outline: none;
-      opacity: 0.8;
-      transition: opacity 0.2s;
-    }
-
-    .volume-slider:hover {
-      opacity: 1;
-    }
-
-    .volume-slider::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      appearance: none;
-      width: 18px;
-      height: 18px;
-      background: #ffffff;
-      border-radius: 50%;
-      cursor: pointer;
-    }
-
-    .volume-slider::-moz-range-thumb {
-      width: 18px;
-      height: 18px;
-      background: #ffffff;
-      border-radius: 50%;
-      cursor: pointer;
-      border: none;
     }
   `;
 
@@ -901,13 +898,6 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
           </button>
         </div>
 
-        <input
-          id="file-input"
-          type="file"
-          style="display: none;"
-          accept="audio/*"
-          @change=${this.handleFileSelected} />
-
         ${this.isSettingsOpen
           ? html`
               <div class="settings-modal-overlay" @click=${this.closeSettings}>
@@ -942,6 +932,18 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                             html`<option value=${value}>${label}</option>`,
                         )}
                       </select>
+                    </div>
+                    <div class="setting">
+                      <span>Output Volume</span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        .value=${String(this.outputVolume)}
+                        @input=${this.handleVolumeChange}
+                        aria-label="Output volume control"
+                      />
                     </div>
 
                     <h3>Service Preferences (MCP)</h3>
@@ -1258,113 +1260,66 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                 </svg>`}
           </button>
           <button
-            id="startButton"
-            @click=${this.startRecording}
-            ?disabled=${this.isRecording}>
-            <svg
-              viewBox="0 0 100 100"
-              width="26px"
-              height="26px"
-              fill="#c80000"
-              xmlns="http://www.w3.org/2000/svg">
-              <circle cx="50" cy="50" r="50" />
-            </svg>
+            class="record-button"
+            @click=${this.isRecording ? this.stopRecording : this.startRecording}
+            aria-label=${this.isRecording ? 'Stop connection' : 'Start connection'}
+          >
+           ${this.isRecording
+              ? html`
+                <svg
+                  viewBox="0 0 100 100"
+                  width="26px"
+                  height="26px"
+                  fill="#ffffff"
+                  xmlns="http://www.w3.org/2000/svg">
+                  <rect x="0" y="0" width="100" height="100" rx="15" />
+                </svg>`
+              : html`
+                <svg
+                  viewBox="0 0 100 100"
+                  width="26px"
+                  height="26px"
+                  fill="#c80000"
+                  xmlns="http://www.w3.org/2000/svg">
+                  <circle cx="50" cy="50" r="50" />
+                </svg>`
+            }
           </button>
           <button
-            id="stopButton"
-            @click=${this.stopRecording}
-            ?disabled=${!this.isRecording}>
-            <svg
-              viewBox="0 0 100 100"
-              width="26px"
-              height="26px"
-              fill="#000000"
-              xmlns="http://www.w3.org/2000/svg">
-              <rect x="0" y="0" width="100" height="100" rx="15" />
-            </svg>
-          </button>
-          <button
-            id="transcribeButton"
-            @click=${this.transcribeFromFile}
-            ?disabled=${this.isRecording}
-            aria-label="Transcribe from file">
-            <svg
-              width="24"
-              height="24"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round">
-              <path
-                d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path>
-              <polyline points="14 2 14 8 20 8"></polyline>
-              <circle cx="10.5" cy="16.5" r="1"></circle>
-              <path d="m11.5 16.5-2-1.5V12"></path>
-            </svg>
-          </button>
-          <div class="volume-control-container">
-            <button
-              @click=${this.toggleOutputMute}
-              class=${classMap({muted: this.isOutputMuted})}
-              aria-label=${this.isOutputMuted
-                ? 'Unmute speaker'
-                : 'Mute speaker'}>
-              ${this.isOutputMuted
-                ? html`<svg
-                    width="26"
-                    height="26"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <polygon
-                      points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                    <line x1="23" y1="9" x2="17" y2="15"></line>
-                    <line x1="17" y1="9" x2="23" y2="15"></line>
-                  </svg>`
-                : html`<svg
-                    width="26"
-                    height="26"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round">
-                    <polygon
-                      points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
-                    <path
-                      d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
-                  </svg>`}
-            </button>
-            <input
-              type="range"
-              min="0"
-              max="1"
-              step="0.01"
-              .value=${String(this.outputVolume)}
-              @input=${this.handleVolumeChange}
-              class="volume-slider"
-              aria-label="Volume control"
-            />
-          </div>
-          <button
-            id="resetButton"
-            @click=${this.reset}
-            ?disabled=${this.isRecording}>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              height="32px"
-              viewBox="0 -960 960 960"
-              width="32px"
-              fill="#ffffff">
-              <path
-                d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z" />
-            </svg>
+            @click=${this.toggleOutputMute}
+            class=${classMap({muted: this.isOutputMuted})}
+            aria-label=${this.isOutputMuted
+              ? 'Unmute speaker'
+              : 'Mute speaker'}>
+            ${this.isOutputMuted
+              ? html`<svg
+                  width="26"
+                  height="26"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round">
+                  <polygon
+                    points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <line x1="23" y1="9" x2="17" y2="15"></line>
+                  <line x1="17" y1="9" x2="23" y2="15"></line>
+                </svg>`
+              : html`<svg
+                  width="26"
+                  height="26"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round">
+                  <polygon
+                    points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path
+                    d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>`}
           </button>
         </div>
 
