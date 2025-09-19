@@ -23,7 +23,11 @@ export class GdmLiveAudio extends LitElement {
   @state() isOutputMuted = false;
 
   @state() private preferredTtsProvider = 'cartesia';
+  @state() private preferredSttProvider = 'deepgram';
   @state() private preferredMsgProvider = 'whatsapp-business';
+  @state() private preferredRagProvider = 'pinecone';
+  @state() private preferredMemProvider = 'redis-memory';
+
   @state() private selectedAiVoice = 'Aoede';
   @state() private activeAiVoice = 'Aoede';
 
@@ -220,8 +224,8 @@ export class GdmLiveAudio extends LitElement {
         color: white;
         border-radius: 12px;
         background: rgba(255, 255, 255, 0.1);
-        width: 64px;
-        height: 64px;
+        width: 52px;
+        height: 52px;
         cursor: pointer;
         font-size: 24px;
         padding: 0;
@@ -372,7 +376,7 @@ export class GdmLiveAudio extends LitElement {
                     statusMessage = `Searching knowledge base for "${args.query}"...`;
                     // Mocked call for demonstration
                     console.log(
-                      `MCP: RAG.search(['pinecone'], { queryText: '${args.query}' })`,
+                      `MCP: RAG.search(['${this.preferredRagProvider}'], { queryText: '${args.query}' })`,
                     );
                     await new Promise((res) => setTimeout(res, 500)); // Simulate async
                     toolResponse = {
@@ -392,7 +396,7 @@ export class GdmLiveAudio extends LitElement {
                     statusMessage = `Remembering that "${args.key}" is "${args.value}"...`;
                     // Mocked call for demonstration
                     console.log(
-                      `MCP: Memory.note(['redis-memory'], { scope: 'user', key: '${args.key}', value: '${args.value}' })`,
+                      `MCP: Memory.note(['${this.preferredMemProvider}'], { scope: 'user', key: '${args.key}', value: '${args.value}' })`,
                     );
                     await new Promise((res) => setTimeout(res, 500)); // Simulate async
                     toolResponse = {
@@ -410,34 +414,38 @@ export class GdmLiveAudio extends LitElement {
 
                 this.updateStatus(statusMessage);
                 // Send response back to the model
-                // FIX: Send tool response parts directly, not nested under a `content` object.
+                // FIX: The `sendRealtimeInput` method expects tool responses to be wrapped in a `content` object that contains a `parts` array.
                 this.session.sendRealtimeInput({
-                  parts: [
-                    {
-                      functionResponse: {
-                        name: functionCall.name,
-                        response: toolResponse,
+                  content: {
+                    parts: [
+                      {
+                        functionResponse: {
+                          name: functionCall.name,
+                          response: toolResponse,
+                        },
                       },
-                    },
-                  ],
+                    ],
+                  },
                 });
               } catch (error) {
                 this.updateError(
                   `Error handling tool: ${(error as Error).message}`,
                 );
-                // FIX: Send tool response parts directly, not nested under a `content` object.
+                // FIX: The `sendRealtimeInput` method expects tool responses to be wrapped in a `content` object that contains a `parts` array.
                 this.session.sendRealtimeInput({
-                  parts: [
-                    {
-                      functionResponse: {
-                        name: functionCall.name,
-                        response: {
-                          success: false,
-                          error: (error as Error).message,
+                  content: {
+                    parts: [
+                      {
+                        functionResponse: {
+                          name: functionCall.name,
+                          response: {
+                            success: false,
+                            error: (error as Error).message,
+                          },
                         },
                       },
-                    },
-                  ],
+                    ],
+                  },
                 });
               }
               return;
@@ -714,6 +722,22 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                       </select>
                     </div>
                     <div class="setting">
+                      <span>Speech-to-Text (STT)</span>
+                      <select
+                        .value=${this.preferredSttProvider}
+                        @change=${(e: Event) =>
+                          (this.preferredSttProvider = (
+                            e.target as HTMLSelectElement
+                          ).value)}>
+                        <option value="deepgram">Deepgram (Paid)</option>
+                        <option value="assemblyai">AssemblyAI (Paid)</option>
+                        <option value="faster-whisper">
+                          FasterWhisper (OSS)
+                        </option>
+                        <option value="vosk">Vosk (OSS)</option>
+                      </select>
+                    </div>
+                    <div class="setting">
                       <span>Messaging</span>
                       <select
                         .value=${this.preferredMsgProvider}
@@ -727,6 +751,36 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                         <option value="twilio">Twilio (Paid)</option>
                         <option value="matrix">Matrix (OSS)</option>
                         <option value="mattermost">Mattermost (OSS)</option>
+                      </select>
+                    </div>
+                    <div class="setting">
+                      <span>Knowledge Base (RAG)</span>
+                      <select
+                        .value=${this.preferredRagProvider}
+                        @change=${(e: Event) =>
+                          (this.preferredRagProvider = (
+                            e.target as HTMLSelectElement
+                          ).value)}>
+                        <option value="pinecone">Pinecone (Paid)</option>
+                        <option value="weaviate-cloud">
+                          Weaviate Cloud (Paid)
+                        </option>
+                        <option value="faiss">FAISS (OSS)</option>
+                        <option value="qdrant">Qdrant (OSS)</option>
+                      </select>
+                    </div>
+                    <div class="setting">
+                      <span>Memory</span>
+                      <select
+                        .value=${this.preferredMemProvider}
+                        @change=${(e: Event) =>
+                          (this.preferredMemProvider = (
+                            e.target as HTMLSelectElement
+                          ).value)}>
+                        <option value="redis-memory">Redis Cloud (Paid)</option>
+                        <option value="notion-memory">Notion (Paid)</option>
+                        <option value="sqlite-memory">SQLite (OSS)</option>
+                        <option value="json-memory">JSON File (OSS)</option>
                       </select>
                     </div>
                   </div>
@@ -749,8 +803,8 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               : 'Mute microphone'}>
             ${this.isInputMuted
               ? html`<svg
-                  width="32"
-                  height="32"
+                  width="26"
+                  height="26"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -766,8 +820,8 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                   <line x1="8" y1="23" x2="16" y2="23"></line>
                 </svg>`
               : html`<svg
-                  width="32"
-                  height="32"
+                  width="26"
+                  height="26"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -787,8 +841,8 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
             ?disabled=${this.isRecording}>
             <svg
               viewBox="0 0 100 100"
-              width="32px"
-              height="32px"
+              width="26px"
+              height="26px"
               fill="#c80000"
               xmlns="http://www.w3.org/2000/svg">
               <circle cx="50" cy="50" r="50" />
@@ -800,8 +854,8 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
             ?disabled=${!this.isRecording}>
             <svg
               viewBox="0 0 100 100"
-              width="32px"
-              height="32px"
+              width="26px"
+              height="26px"
               fill="#000000"
               xmlns="http://www.w3.org/2000/svg">
               <rect x="0" y="0" width="100" height="100" rx="15" />
@@ -815,8 +869,8 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               : 'Mute speaker'}>
             ${this.isOutputMuted
               ? html`<svg
-                  width="32"
-                  height="32"
+                  width="26"
+                  height="26"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -829,8 +883,8 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                   <line x1="17" y1="9" x2="23" y2="15"></line>
                 </svg>`
               : html`<svg
-                  width="32"
-                  height="32"
+                  width="26"
+                  height="26"
                   viewBox="0 0 24 24"
                   fill="none"
                   stroke="currentColor"
@@ -849,9 +903,9 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
             ?disabled=${this.isRecording}>
             <svg
               xmlns="http://www.w3.org/2000/svg"
-              height="40px"
+              height="32px"
               viewBox="0 -960 960 960"
-              width="40px"
+              width="32px"
               fill="#ffffff">
               <path
                 d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z" />
