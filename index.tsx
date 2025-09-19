@@ -567,7 +567,7 @@ export class GdmLiveAudio extends LitElement {
 
                 this.updateStatus(statusMessage);
                 // Send response back to the model
-                // FIX: Corrected property `toolResponse` to `toolResponses` to conform to the `LiveSendRealtimeInputParameters` type.
+                // FIX: The property for tool responses should be `toolResponses`.
                 this.session.sendRealtimeInput({
                   toolResponses: [
                     {
@@ -582,7 +582,7 @@ export class GdmLiveAudio extends LitElement {
                 this.updateError(
                   `Error handling tool: ${(error as Error).message}`,
                 );
-                // FIX: Corrected property `toolResponse` to `toolResponses` to conform to the `LiveSendRealtimeInputParameters` type.
+                // FIX: The property for tool responses should be `toolResponses`.
                 this.session.sendRealtimeInput({
                   toolResponses: [
                     {
@@ -677,7 +677,12 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
           responseModalities: [Modality.AUDIO],
           speechConfig: {
             voiceConfig: {prebuiltVoiceConfig: {voiceName: this.activeAiVoice}},
+            // FIX: The property for the end of speech timeout should be `endOfSpeechTimeout`.
+            endOfSpeechTimeout: 3000, // Wait for 3 seconds of silence before responding.
             // languageCode: 'en-GB'
+            interruptionConfig: {
+              holdDurationMs: 500, // Wait 500ms of user speech before interrupting.
+            },
           },
         },
       });
