@@ -31,6 +31,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
   private camera!: THREE.PerspectiveCamera;
   private backdrop!: THREE.Mesh;
   private composer!: EffectComposer;
+  private bloomPass!: UnrealBloomPass;
   private sphere!: THREE.Mesh;
   private prevTime = 0;
   private rotation = new THREE.Vector3(0, 0, 0);
@@ -155,6 +156,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
       0.5,
       0,
     );
+    this.bloomPass = bloomPass;
 
     const fxaaPass = new ShaderPass(FXAAShader);
 
@@ -186,6 +188,30 @@ export class GdmLiveAudioVisuals3D extends LitElement {
     this.animation();
   }
 
+  private getAudioFeatures(data: Uint8Array): {
+    bass: number;
+    mid: number;
+    high: number;
+    volume: number;
+  } {
+    if (!data || data.length === 0) {
+      return {bass: 0, mid: 0, high: 0, volume: 0};
+    }
+
+    const bassBins = data.slice(0, 5);
+    const midBins = data.slice(5, 20);
+    const highBins = data.slice(20, 50);
+
+    const bass =
+      bassBins.reduce((a, b) => a + b, 0) / bassBins.length / 255;
+    const mid = midBins.reduce((a, b) => a + b, 0) / midBins.length / 255;
+    const high = highBins.reduce((a, b) => a + b, 0) / highBins.length / 255;
+
+    const volume = data.reduce((a, b) => a + b, 0) / data.length / 255;
+
+    return {bass, mid, high, volume};
+  }
+
   private animation() {
     requestAnimationFrame(() => this.animation());
 
@@ -200,16 +226,26 @@ export class GdmLiveAudioVisuals3D extends LitElement {
 
     backdropMaterial.uniforms.rand.value = Math.random() * 10000;
 
-    if (sphereMaterial.userData.shader) {
-      this.sphere.scale.setScalar(
-        1 + (0.2 * this.outputAnalyser.data[1]) / 255,
-      );
+    const inputFeatures = this.getAudioFeatures(this.inputAnalyser.data);
+    const outputFeatures = this.getAudioFeatures(this.outputAnalyser.data);
+    const totalVolume = (inputFeatures.volume + outputFeatures.volume) / 2;
+    const totalBass = (inputFeatures.bass + outputFeatures.bass) / 2;
 
-      const f = 0.001;
-      this.rotation.x += (dt * f * 0.5 * this.outputAnalyser.data[1]) / 255;
-      this.rotation.z += (dt * f * 0.5 * this.inputAnalyser.data[1]) / 255;
-      this.rotation.y += (dt * f * 0.25 * this.inputAnalyser.data[2]) / 255;
-      this.rotation.y += (dt * f * 0.25 * this.outputAnalyser.data[2]) / 255;
+    // Update post-processing bloom effect based on volume
+    if (this.bloomPass) {
+      this.bloomPass.strength = 0.8 + totalVolume * 4.0;
+      this.bloomPass.radius = 0.2 + totalBass * 0.8;
+    }
+
+    if (sphereMaterial.userData.shader) {
+      // Update sphere scale based on output volume
+      this.sphere.scale.setScalar(1 + 0.2 * outputFeatures.volume);
+
+      // Update rotation based on audio features
+      const f = 0.002;
+      this.rotation.x += dt * f * outputFeatures.mid;
+      this.rotation.z += dt * f * inputFeatures.mid;
+      this.rotation.y += dt * f * (inputFeatures.high + outputFeatures.high);
 
       const euler = new THREE.Euler(
         this.rotation.x,
@@ -222,18 +258,26 @@ export class GdmLiveAudioVisuals3D extends LitElement {
       this.camera.position.copy(vector);
       this.camera.lookAt(this.sphere.position);
 
+      // Update sphere material color and emissiveness
+      sphereMaterial.emissive.setHSL(
+        0.55 + totalBass * 0.2, // Hue shifts from blue to teal/green with bass
+        0.8,
+        0.2 + totalVolume * 0.4, // Lightness increases with overall volume
+      );
+
+      // Update shader uniforms for displacement
       sphereMaterial.userData.shader.uniforms.time.value +=
-        (dt * 0.1 * this.outputAnalyser.data[0]) / 255;
+        dt * 0.01 + dt * 0.1 * outputFeatures.volume;
       sphereMaterial.userData.shader.uniforms.inputData.value.set(
-        (1 * this.inputAnalyser.data[0]) / 255,
-        (0.1 * this.inputAnalyser.data[1]) / 255,
-        (10 * this.inputAnalyser.data[2]) / 255,
+        inputFeatures.bass * 2,
+        inputFeatures.mid * 0.5,
+        inputFeatures.high * 10,
         0,
       );
       sphereMaterial.userData.shader.uniforms.outputData.value.set(
-        (2 * this.outputAnalyser.data[0]) / 255,
-        (0.1 * this.outputAnalyser.data[1]) / 255,
-        (10 * this.outputAnalyser.data[2]) / 255,
+        outputFeatures.bass * 4,
+        outputFeatures.mid,
+        outputFeatures.high * 10,
         0,
       );
     }

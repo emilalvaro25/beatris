@@ -4,10 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleGenAI, LiveServerMessage, Modality, Session} from '@google/genai';
+// FIX: Import `Type` enum for function declaration schemas.
+import {GoogleGenAI, LiveServerMessage, Modality, Session, Type} from '@google/genai';
 import {LitElement, css, html} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {classMap} from 'lit/directives/class-map.js';
+import {Messaging, RAG, Memory} from './mcp';
 import {createBlob, decode, decodeAudioData} from './utils';
 import './visual-3d';
 
@@ -19,6 +21,11 @@ export class GdmLiveAudio extends LitElement {
   @state() private isSettingsOpen = false;
   @state() isInputMuted = false;
   @state() isOutputMuted = false;
+
+  @state() private preferredTtsProvider = 'cartesia';
+  @state() private preferredMsgProvider = 'whatsapp-business';
+  @state() private selectedAiVoice = 'Aoede';
+  @state() private activeAiVoice = 'Aoede';
 
   private client: GoogleGenAI;
   private session: Session;
@@ -35,6 +42,18 @@ export class GdmLiveAudio extends LitElement {
   private sourceNode: AudioBufferSourceNode;
   private scriptProcessorNode: ScriptProcessorNode;
   private sources = new Set<AudioBufferSourceNode>();
+
+  private aiVoices = {
+    'Aoede': 'Aoede (Female)',
+    'Thelxiepeia': 'Thelxiepeia (Female)',
+    'Peisinoe': 'Peisinoe (Female)',
+    'Aglaope': 'Aglaope (Female)',
+    'en-US-Standard-A': 'Standard A (Male)',
+    'en-US-Standard-B': 'Standard B (Male)',
+    'en-US-Standard-C': 'Standard C (Female)',
+    'en-US-Standard-D': 'Standard D (Male)',
+    'en-US-Standard-E': 'Standard E (Female)',
+  };
 
   static styles = css`
     :host {
@@ -113,6 +132,20 @@ export class GdmLiveAudio extends LitElement {
       line-height: 1;
     }
 
+    .settings-modal-body h3 {
+      margin-top: 24px;
+      margin-bottom: 16px;
+      font-weight: 500;
+      color: #9ca3af;
+      font-size: 1rem;
+      border-bottom: 1px solid #374151;
+      padding-bottom: 8px;
+    }
+
+    .settings-modal-body h3:first-of-type {
+      margin-top: 0;
+    }
+
     .setting {
       display: flex;
       justify-content: space-between;
@@ -120,49 +153,19 @@ export class GdmLiveAudio extends LitElement {
       padding: 12px 0;
     }
 
-    .switch {
-      position: relative;
-      display: inline-block;
-      width: 60px;
-      height: 34px;
+    .setting select {
+      background-color: #374151;
+      color: white;
+      border: 1px solid #4b5563;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-size: 0.9rem;
     }
 
-    .switch input {
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-
-    .slider {
-      position: absolute;
-      cursor: pointer;
-      top: 0;
-      left: 0;
-      right: 0;
-      bottom: 0;
-      background-color: #4b5563;
-      transition: 0.4s;
-      border-radius: 34px;
-    }
-
-    .slider:before {
-      position: absolute;
-      content: '';
-      height: 26px;
-      width: 26px;
-      left: 4px;
-      bottom: 4px;
-      background-color: white;
-      transition: 0.4s;
-      border-radius: 50%;
-    }
-
-    input:checked + .slider {
-      background-color: #3b82f6;
-    }
-
-    input:checked + .slider:before {
-      transform: translateX(26px);
+    .setting select:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 2px #1e40af;
     }
 
     .settings-modal-footer {
@@ -256,7 +259,7 @@ export class GdmLiveAudio extends LitElement {
     this.initAudio();
 
     this.client = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey: process.env.API_KEY,
     });
 
     this.outputNode.connect(this.outputAudioContext.destination);
@@ -265,7 +268,8 @@ export class GdmLiveAudio extends LitElement {
   }
 
   private async initSession() {
-    const model = 'gemini-2.5-flash-preview-native-audio-dialog';
+    const model = 'gemini-2.5-flash';
+    // FIX: Use `Type` enum for schema definitions to conform to @google/genai types.
     const tools = [
       {
         functionDeclarations: [
@@ -273,6 +277,57 @@ export class GdmLiveAudio extends LitElement {
             name: 'get_current_time',
             description:
               'Get the current time to answer time-related questions.',
+          },
+          {
+            name: 'send_message',
+            description: 'Send a message to a contact.',
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                target: {
+                  type: Type.STRING,
+                  description:
+                    'The recipient of the message, e.g., a phone number for WhatsApp.',
+                },
+                body: {
+                  type: Type.STRING,
+                  description: 'The content of the message.',
+                },
+              },
+              required: ['target', 'body'],
+            },
+          },
+          {
+            name: 'search_knowledge_base',
+            description: 'Search the knowledge base for information.',
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                query: {
+                  type: Type.STRING,
+                  description: 'The search query.',
+                },
+              },
+              required: ['query'],
+            },
+          },
+          {
+            name: 'save_memory',
+            description: 'Save a piece of information to memory.',
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                key: {
+                  type: Type.STRING,
+                  description: 'The key to store the information under.',
+                },
+                value: {
+                  type: Type.STRING,
+                  description: 'The information to store.',
+                },
+              },
+              required: ['key', 'value'],
+            },
           },
         ],
       },
@@ -290,16 +345,96 @@ export class GdmLiveAudio extends LitElement {
               message.serverContent?.modelTurn?.parts[0]?.functionCall;
 
             if (functionCall) {
-              if (functionCall.name === 'get_current_time') {
-                this.updateStatus('Beatrice is checking the time...');
-                const currentTime = new Date().toLocaleTimeString();
-                // FIX: `toolResponses` is not a valid property for sending a tool response. The correct property is `parts`, which aligns with the Gemini API structure where function calls are received in parts and responses should be sent back as parts.
+              let toolResponse: any;
+              let statusMessage = '';
+              // FIX: Access arguments from `functionCall.args` instead of `functionCall.parameters`.
+              const args = functionCall.args || {};
+
+              try {
+                switch (functionCall.name) {
+                  case 'get_current_time':
+                    statusMessage = 'Beatrice is checking the time...';
+                    toolResponse = {time: new Date().toLocaleTimeString()};
+                    break;
+                  case 'send_message':
+                    statusMessage = `Sending message to ${args.target}...`;
+                    // Mocked call for demonstration
+                    console.log(
+                      `MCP: Messaging.send(['${this.preferredMsgProvider}'], { target: '${args.target}', body: '${args.body}' })`,
+                    );
+                    await new Promise((res) => setTimeout(res, 500)); // Simulate async
+                    toolResponse = {
+                      success: true,
+                      message: `Message to ${args.target} has been queued.`,
+                    };
+                    break;
+                  case 'search_knowledge_base':
+                    statusMessage = `Searching knowledge base for "${args.query}"...`;
+                    // Mocked call for demonstration
+                    console.log(
+                      `MCP: RAG.search(['pinecone'], { queryText: '${args.query}' })`,
+                    );
+                    await new Promise((res) => setTimeout(res, 500)); // Simulate async
+                    toolResponse = {
+                      success: true,
+                      results: [
+                        {
+                          id: 'doc1',
+                          score: 0.9,
+                          metadata: {
+                            text: 'The sky is blue due to Rayleigh scattering.',
+                          },
+                        },
+                      ],
+                    };
+                    break;
+                  case 'save_memory':
+                    statusMessage = `Remembering that "${args.key}" is "${args.value}"...`;
+                    // Mocked call for demonstration
+                    console.log(
+                      `MCP: Memory.note(['redis-memory'], { scope: 'user', key: '${args.key}', value: '${args.value}' })`,
+                    );
+                    await new Promise((res) => setTimeout(res, 500)); // Simulate async
+                    toolResponse = {
+                      success: true,
+                      message: 'Information saved to memory.',
+                    };
+                    break;
+                  default:
+                    statusMessage = `Unknown request: ${functionCall.name}`;
+                    toolResponse = {
+                      success: false,
+                      error: `Unknown function call: ${functionCall.name}`,
+                    };
+                }
+
+                this.updateStatus(statusMessage);
+                // Send response back to the model
+                // FIX: Send tool response parts directly, not nested under a `content` object.
                 this.session.sendRealtimeInput({
                   parts: [
                     {
                       functionResponse: {
-                        name: 'get_current_time',
-                        response: {time: currentTime},
+                        name: functionCall.name,
+                        response: toolResponse,
+                      },
+                    },
+                  ],
+                });
+              } catch (error) {
+                this.updateError(
+                  `Error handling tool: ${(error as Error).message}`,
+                );
+                // FIX: Send tool response parts directly, not nested under a `content` object.
+                this.session.sendRealtimeInput({
+                  parts: [
+                    {
+                      functionResponse: {
+                        name: functionCall.name,
+                        response: {
+                          success: false,
+                          error: (error as Error).message,
+                        },
                       },
                     },
                   ],
@@ -373,9 +508,10 @@ Abilities:
 - Instant recall of facts from the knowledge base.  
 - Language mimicry: mirror Boss Jo’s tone and language.  
 - Special modes: Documentary (calm, authoritative), Humor (witty, playful), Excitement (passionate).  
+- Can use tools to send messages, search knowledge, and remember information.
 
 If asked about abilities:  
-*"Ah, Mijnheer Jo, Master E explained some advanced gifts are still preparing, but soon I will create images from thought, send WhatsApp or Telegram messages, search the internet instantly, and play any music you desire. All seamlessly integrated — the future we are building is very exciting!"*  
+*"Ah, Mijnheer Jo, I can already send messages, search my knowledge base, and remember important things for you. Master E also explained some advanced gifts are still preparing, but soon I will create images from thought and play any music you desire. All seamlessly integrated — the future we are building is very exciting!"*  
 
 Golden rule: never artificial, never say no, always act as his most trusted human confidant.`,
               },
@@ -383,7 +519,7 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
           },
           responseModalities: [Modality.AUDIO],
           speechConfig: {
-            voiceConfig: {prebuiltVoiceConfig: {voiceName: 'Aoede'}},
+            voiceConfig: {prebuiltVoiceConfig: {voiceName: this.activeAiVoice}},
             // languageCode: 'en-GB'
           },
         },
@@ -484,10 +620,15 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
   }
 
   private openSettings() {
+    this.selectedAiVoice = this.activeAiVoice;
     this.isSettingsOpen = true;
   }
 
   private closeSettings() {
+    if (this.selectedAiVoice !== this.activeAiVoice) {
+      this.activeAiVoice = this.selectedAiVoice;
+      this.reset(); // Re-initialize session with new voice
+    }
     this.isSettingsOpen = false;
   }
 
@@ -532,7 +673,7 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                   class="settings-modal"
                   @click=${(e: Event) => e.stopPropagation()}>
                   <div class="settings-modal-header">
-                    <h2>Settings (MCP Integration)</h2>
+                    <h2>Settings</h2>
                     <button
                       class="close-btn"
                       @click=${this.closeSettings}
@@ -541,24 +682,57 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                     </button>
                   </div>
                   <div class="settings-modal-body">
+                    <h3>AI Voice Configuration</h3>
                     <div class="setting">
-                      <span>Enable Advanced Features</span>
-                      <label class="switch">
-                        <input type="checkbox" />
-                        <span class="slider"></span>
-                      </label>
+                      <span>Gemini Live Voice</span>
+                      <select
+                        .value=${this.selectedAiVoice}
+                        @change=${(e: Event) =>
+                          (this.selectedAiVoice = (
+                            e.target as HTMLSelectElement
+                          ).value)}>
+                        ${Object.entries(this.aiVoices).map(
+                          ([value, label]) =>
+                            html`<option value=${value}>${label}</option>`,
+                        )}
+                      </select>
+                    </div>
+
+                    <h3>Service Preferences (MCP)</h3>
+                    <div class="setting">
+                      <span>Text-to-Speech (TTS)</span>
+                      <select
+                        .value=${this.preferredTtsProvider}
+                        @change=${(e: Event) =>
+                          (this.preferredTtsProvider = (
+                            e.target as HTMLSelectElement
+                          ).value)}>
+                        <option value="cartesia">Cartesia (Paid)</option>
+                        <option value="elevenlabs">ElevenLabs (Paid)</option>
+                        <option value="coqui-xtts">Coqui XTTS (OSS)</option>
+                        <option value="piper">Piper (OSS)</option>
+                      </select>
                     </div>
                     <div class="setting">
-                      <span>Another Setting</span>
-                      <label class="switch">
-                        <input type="checkbox" checked />
-                        <span class="slider"></span>
-                      </label>
+                      <span>Messaging</span>
+                      <select
+                        .value=${this.preferredMsgProvider}
+                        @change=${(e: Event) =>
+                          (this.preferredMsgProvider = (
+                            e.target as HTMLSelectElement
+                          ).value)}>
+                        <option value="whatsapp-business">
+                          WhatsApp (Paid)
+                        </option>
+                        <option value="twilio">Twilio (Paid)</option>
+                        <option value="matrix">Matrix (OSS)</option>
+                        <option value="mattermost">Mattermost (OSS)</option>
+                      </select>
                     </div>
                   </div>
                   <div class="settings-modal-footer">
                     <button class="save-btn" @click=${this.closeSettings}>
-                      Save Changes
+                      Done
                     </button>
                   </div>
                 </div>
