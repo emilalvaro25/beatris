@@ -7,6 +7,7 @@
 import {GoogleGenAI, LiveServerMessage, Modality, Session} from '@google/genai';
 import {LitElement, css, html} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
+import {classMap} from 'lit/directives/class-map.js';
 import {createBlob, decode, decodeAudioData} from './utils';
 import './visual-3d';
 
@@ -16,6 +17,8 @@ export class GdmLiveAudio extends LitElement {
   @state() status = '';
   @state() error = '';
   @state() private isSettingsOpen = false;
+  @state() isInputMuted = false;
+  @state() isOutputMuted = false;
 
   private client: GoogleGenAI;
   private session: Session;
@@ -182,7 +185,7 @@ export class GdmLiveAudio extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
-      flex-direction: column;
+      flex-direction: row;
       gap: 10px;
 
       button {
@@ -197,10 +200,18 @@ export class GdmLiveAudio extends LitElement {
         font-size: 24px;
         padding: 0;
         margin: 0;
+        display: flex;
+        align-items: center;
+        justify-content: center;
 
         &:hover {
           background: rgba(255, 255, 255, 0.2);
         }
+      }
+
+      button.muted {
+        background: rgba(200, 50, 50, 0.3);
+        border-color: rgba(200, 50, 50, 0.5);
       }
 
       button[disabled] {
@@ -259,14 +270,16 @@ export class GdmLiveAudio extends LitElement {
               if (functionCall.name === 'get_current_time') {
                 this.updateStatus('Beatrice is checking the time...');
                 const currentTime = new Date().toLocaleTimeString();
-                // FIX: `functionResponse` is not a valid top-level property. It should be wrapped in a `toolResponse` object.
+                // FIX: `toolResponse` is not a valid top-level property. The correct property is `toolResponses`, which is an array.
                 this.session.sendRealtimeInput({
-                  toolResponse: {
-                    functionResponse: {
-                      name: 'get_current_time',
-                      response: {time: currentTime},
+                  toolResponses: [
+                    {
+                      functionResponse: {
+                        name: 'get_current_time',
+                        response: {time: currentTime},
+                      },
                     },
-                  },
+                  ],
                 });
               }
               return;
@@ -455,6 +468,16 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
     this.isSettingsOpen = false;
   }
 
+  private toggleInputMute() {
+    this.isInputMuted = !this.isInputMuted;
+    this.inputNode.gain.value = this.isInputMuted ? 0 : 1;
+  }
+
+  private toggleOutputMute() {
+    this.isOutputMuted = !this.isOutputMuted;
+    this.outputNode.gain.value = this.isOutputMuted ? 0 : 1;
+  }
+
   render() {
     return html`
       <div>
@@ -517,18 +540,44 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
 
         <div class="controls">
           <button
-            id="resetButton"
-            @click=${this.reset}
-            ?disabled=${this.isRecording}>
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              height="40px"
-              viewBox="0 -960 960 960"
-              width="40px"
-              fill="#ffffff">
-              <path
-                d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z" />
-            </svg>
+            @click=${this.toggleInputMute}
+            class=${classMap({muted: this.isInputMuted})}
+            aria-label=${this.isInputMuted
+              ? 'Unmute microphone'
+              : 'Mute microphone'}>
+            ${this.isInputMuted
+              ? html`<svg
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round">
+                  <line x1="1" y1="1" x2="23" y2="23"></line>
+                  <path
+                    d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6"></path>
+                  <path
+                    d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23"></path>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                </svg>`
+              : html`<svg
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round">
+                  <path
+                    d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                  <line x1="8" y1="23" x2="16" y2="23"></line>
+                  <line x1="12" y1="19" x2="12" y2="23"></line>
+                </svg>`}
           </button>
           <button
             id="startButton"
@@ -554,6 +603,56 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               fill="#000000"
               xmlns="http://www.w3.org/2000/svg">
               <rect x="0" y="0" width="100" height="100" rx="15" />
+            </svg>
+          </button>
+          <button
+            @click=${this.toggleOutputMute}
+            class=${classMap({muted: this.isOutputMuted})}
+            aria-label=${this.isOutputMuted
+              ? 'Unmute speaker'
+              : 'Mute speaker'}>
+            ${this.isOutputMuted
+              ? html`<svg
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round">
+                  <polygon
+                    points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <line x1="23" y1="9" x2="17" y2="15"></line>
+                  <line x1="17" y1="9" x2="23" y2="15"></line>
+                </svg>`
+              : html`<svg
+                  width="32"
+                  height="32"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round">
+                  <polygon
+                    points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"></polygon>
+                  <path
+                    d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07"></path>
+                </svg>`}
+          </button>
+          <button
+            id="resetButton"
+            @click=${this.reset}
+            ?disabled=${this.isRecording}>
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              height="40px"
+              viewBox="0 -960 960 960"
+              width="40px"
+              fill="#ffffff">
+              <path
+                d="M480-160q-134 0-227-93t-93-227q0-134 93-227t227-93q69 0 132 28.5T720-690v-110h80v280H520v-80h168q-32-56-87.5-88T480-720q-100 0-170 70t-70 170q0 100 70 170t170 70q77 0 139-44t87-116h84q-28 106-114 173t-196 67Z" />
             </svg>
           </button>
         </div>
