@@ -165,6 +165,29 @@ export class GdmLiveAudio extends LitElement {
       transform: translateX(26px);
     }
 
+    .settings-modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      padding-top: 20px;
+      margin-top: 20px;
+      border-top: 1px solid #374151;
+    }
+
+    .save-btn {
+      background-color: #3b82f6;
+      color: white;
+      border: none;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background-color 0.2s;
+    }
+
+    .save-btn:hover {
+      background-color: #2563eb;
+    }
+
     #status {
       position: absolute;
       bottom: 5vh;
@@ -270,9 +293,9 @@ export class GdmLiveAudio extends LitElement {
               if (functionCall.name === 'get_current_time') {
                 this.updateStatus('Beatrice is checking the time...');
                 const currentTime = new Date().toLocaleTimeString();
-                // FIX: `toolResponse` is not a valid top-level property. The correct property is `toolResponses`, which is an array.
+                // FIX: `toolResponses` is not a valid property for sending a tool response. The correct property is `parts`, which aligns with the Gemini API structure where function calls are received in parts and responses should be sent back as parts.
                 this.session.sendRealtimeInput({
-                  toolResponses: [
+                  parts: [
                     {
                       functionResponse: {
                         name: 'get_current_time',
@@ -532,6 +555,11 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                         <span class="slider"></span>
                       </label>
                     </div>
+                  </div>
+                  <div class="settings-modal-footer">
+                    <button class="save-btn" @click=${this.closeSettings}>
+                      Save Changes
+                    </button>
                   </div>
                 </div>
               </div>
