@@ -10,7 +10,7 @@ import {LitElement, css, html} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {classMap} from 'lit/directives/class-map.js';
 import {createBlob, decode, decodeAudioData} from './utils';
-import './visual-3d';
+import './visual-orb';
 
 interface ContactData {
   lastInboundAt: number;
@@ -57,6 +57,7 @@ export class GdmLiveAudio extends LitElement {
       width: 100%;
       height: 100%;
       display: block;
+      background-color: #0d1117;
     }
 
     .header {
@@ -340,6 +341,7 @@ export class GdmLiveAudio extends LitElement {
         display: flex;
         align-items: center;
         justify-content: center;
+        backdrop-filter: blur(4px);
 
         &:hover {
           background: rgba(255, 255, 255, 0.2);
@@ -476,18 +478,14 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               if (functionCall.name === 'get_current_time') {
                 this.updateStatus('Beatrice is checking the time...');
                 const currentTime = new Date().toLocaleTimeString();
-                // FIX: The `LiveSendRealtimeInputParameters` type expects `toolOutput` for tool/function call responses.
+                // FIX: The property 'toolResponses' is not a valid property for 'sendRealtimeInput'. It has been changed to 'toolResponse'.
                 this.session.sendRealtimeInput({
-                  toolOutput: {
-                    responses: [
-                      {
-                        functionResponse: {
-                          name: 'get_current_time',
-                          response: {time: currentTime},
-                        },
-                      },
-                    ],
-                  },
+                  toolResponse: [{
+                    functionResponse: {
+                      name: 'get_current_time',
+                      response: {time: currentTime},
+                    },
+                  }],
                 });
               } else if (functionCall.name === 'send_whatsapp_message') {
                 this.updateStatus('Beatrice is sending a WhatsApp message...');
@@ -507,18 +505,14 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                     'Failed: The 24-hour conversation window is closed. Cannot send message.';
                 }
 
-                // FIX: The `LiveSendRealtimeInputParameters` type expects `toolOutput` for tool/function call responses.
+                // FIX: The property 'toolResponses' is not a valid property for 'sendRealtimeInput'. It has been changed to 'toolResponse'.
                 this.session.sendRealtimeInput({
-                  toolOutput: {
-                    responses: [
-                      {
-                        functionResponse: {
-                          name: 'send_whatsapp_message',
-                          response: {status: responseMessage},
-                        },
-                      },
-                    ],
-                  },
+                  toolResponse: [{
+                    functionResponse: {
+                      name: 'send_whatsapp_message',
+                      response: {status: responseMessage},
+                    },
+                  }],
                 });
               }
               return;
@@ -1061,9 +1055,9 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
         </div>
 
         <div id="status">${this.error || this.status}</div>
-        <gdm-live-audio-visuals-3d
+        <gdm-live-audio-visuals-orb
           .inputNode=${this.inputNode}
-          .outputNode=${this.outputNode}></gdm-live-audio-visuals-3d>
+          .outputNode=${this.outputNode}></gdm-live-audio-visuals-orb>
       </div>
     `;
   }
