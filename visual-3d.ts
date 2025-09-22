@@ -32,6 +32,7 @@ export class GdmLiveAudioVisuals3D extends LitElement {
   private backdrop!: THREE.Mesh;
   private composer!: EffectComposer;
   private sphere!: THREE.Mesh;
+  private core!: THREE.Mesh;
   private prevTime = 0;
   private rotation = new THREE.Vector3(0, 0, 0);
 
@@ -147,6 +148,19 @@ export class GdmLiveAudioVisuals3D extends LitElement {
 
     this.sphere = sphere;
 
+    const coreGeometry = new THREE.IcosahedronGeometry(0.3, 5);
+    const coreMaterial = new THREE.MeshStandardMaterial({
+      color: 0x87ceeb,
+      emissive: 0x87ceeb,
+      emissiveIntensity: 2,
+      roughness: 0.2,
+      metalness: 0.8,
+      transparent: true,
+      opacity: 0.8,
+    });
+    this.core = new THREE.Mesh(coreGeometry, coreMaterial);
+    this.sphere.add(this.core);
+
     const renderPass = new RenderPass(scene, camera);
 
     const bloomPass = new UnrealBloomPass(
@@ -236,6 +250,18 @@ export class GdmLiveAudioVisuals3D extends LitElement {
         (10 * this.outputAnalyser.data[2]) / 255,
         0,
       );
+    }
+
+    if (this.core) {
+      const outputVolume = this.outputAnalyser.data[1] / 255;
+      const coreMaterial = this.core.material as THREE.MeshStandardMaterial;
+
+      coreMaterial.emissiveIntensity = 2 + outputVolume * 4;
+      coreMaterial.opacity = 0.7 + outputVolume * 0.3;
+
+      this.core.position.y = Math.sin(t * 0.0005) * 0.1;
+      this.core.rotation.y += dt * 0.01;
+      this.core.rotation.x += dt * 0.005;
     }
 
     this.composer.render();

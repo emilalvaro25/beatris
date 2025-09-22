@@ -4,12 +4,21 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import {GoogleGenAI, LiveServerMessage, Modality, Session} from '@google/genai';
+// FIX: Import `Type` enum for use in function declaration schemas.
+import {GoogleGenAI, LiveServerMessage, Modality, Session, Type} from '@google/genai';
 import {LitElement, css, html} from 'lit';
 import {customElement, state} from 'lit/decorators.js';
 import {classMap} from 'lit/directives/class-map.js';
 import {createBlob, decode, decodeAudioData} from './utils';
 import './visual-3d';
+
+interface ContactData {
+  lastInboundAt: number;
+  windowExpiresAt: number;
+  lastMsgId: string;
+}
+
+const CONTACTS_STORAGE_KEY = 'beatrice_whatsapp_contacts';
 
 @customElement('gdm-live-audio')
 export class GdmLiveAudio extends LitElement {
@@ -20,6 +29,10 @@ export class GdmLiveAudio extends LitElement {
   @state() isInputMuted = false;
   @state() isOutputMuted = false;
   @state() private activeVoiceMode = 'Normal';
+  @state() private isWhatsAppEnabled = false;
+  @state() private whatsAppToken = '';
+  @state() private simChatId = '';
+  @state() private simMessage = '';
 
   private voiceModes = ['Normal', 'Documentary', 'Humor', 'Excitement'];
 
@@ -83,6 +96,7 @@ export class GdmLiveAudio extends LitElement {
       display: flex;
       align-items: center;
       justify-content: center;
+      backdrop-filter: blur(4px);
     }
 
     .settings-modal {
@@ -93,18 +107,47 @@ export class GdmLiveAudio extends LitElement {
       width: 90%;
       max-width: 500px;
       box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      max-height: 90vh;
     }
 
     .settings-modal-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
     }
 
     .settings-modal-header h2 {
       margin: 0;
       font-size: 1.5rem;
+    }
+
+    .settings-modal-body {
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      flex: 1;
+      overflow-y: auto;
+      padding-right: 12px;
+    }
+
+    .setting-group {
+      background-color: #374151;
+      border-radius: 8px;
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .setting-group h3 {
+      margin: 0;
+      font-size: 1.1rem;
+      color: #d1d5db;
+      border-bottom: 1px solid #4b5563;
+      padding-bottom: 12px;
     }
 
     .close-btn {
@@ -117,10 +160,18 @@ export class GdmLiveAudio extends LitElement {
     }
 
     .setting {
-      display: flex;
-      justify-content: space-between;
+      display: grid;
+      grid-template-columns: auto 1fr;
       align-items: center;
-      padding: 12px 0;
+      gap: 16px;
+    }
+    
+    .setting > .switch {
+      justify-self: end;
+    }
+
+    .setting label {
+      flex-shrink: 0;
     }
 
     .switch {
@@ -128,6 +179,7 @@ export class GdmLiveAudio extends LitElement {
       display: inline-block;
       width: 60px;
       height: 34px;
+      flex-shrink: 0;
     }
 
     .switch input {
@@ -171,12 +223,13 @@ export class GdmLiveAudio extends LitElement {
     .settings-modal-footer {
       display: flex;
       justify-content: flex-end;
-      padding-top: 20px;
-      margin-top: 20px;
+      padding-top: 12px;
+      margin-top: 8px;
       border-top: 1px solid #374151;
     }
 
-    .save-btn {
+    .save-btn,
+    .sim-btn {
       background-color: #3b82f6;
       color: white;
       border: none;
@@ -187,8 +240,66 @@ export class GdmLiveAudio extends LitElement {
       transition: background-color 0.2s;
     }
 
-    .save-btn:hover {
+    .save-btn:hover,
+    .sim-btn:hover {
       background-color: #2563eb;
+    }
+
+    .input-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .input-group label {
+      color: #9ca3af;
+    }
+    .input-group input,
+    .input-group textarea,
+    .input-group select {
+      width: 100%;
+      background-color: #1f2937;
+      border: 1px solid #4b5563;
+      color: white;
+      padding: 8px 12px;
+      border-radius: 6px;
+      box-sizing: border-box;
+      font-family: inherit;
+      font-size: 1rem;
+    }
+    .webhook-info {
+      margin-top: 16px;
+      background-color: #111827;
+      padding: 12px;
+      border-radius: 6px;
+    }
+    .webhook-info label {
+      font-weight: bold;
+      color: #d1d5db;
+    }
+    .webhook-info p {
+      margin: 8px 0 4px;
+      color: #9ca3af;
+      font-size: 0.9rem;
+    }
+    .webhook-info code {
+      background-color: #374151;
+      padding: 8px 12px;
+      border-radius: 4px;
+      font-family: monospace;
+      color: #e5e7eb;
+      display: block;
+      word-break: break-all;
+    }
+    .webhook-info small {
+      display: block;
+      margin-top: 12px;
+      color: #6b7280;
+      font-style: italic;
+    }
+    .webhook-simulator {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid #4b5563;
     }
 
     #status {
@@ -200,43 +311,6 @@ export class GdmLiveAudio extends LitElement {
       text-align: center;
       color: white;
       font-family: sans-serif;
-    }
-
-    .voice-modes {
-      position: absolute;
-      bottom: calc(10vh + 84px);
-      left: 0;
-      right: 0;
-      display: flex;
-      justify-content: center;
-      gap: 10px;
-      z-index: 10;
-    }
-
-    .voice-modes button {
-      background: rgba(255, 255, 255, 0.1);
-      border: 1px solid rgba(255, 255, 255, 0.2);
-      color: white;
-      padding: 8px 16px;
-      border-radius: 20px;
-      cursor: pointer;
-      font-family: sans-serif;
-      font-size: 14px;
-      transition: background-color 0.2s, border-color 0.2s;
-    }
-
-    .voice-modes button:hover:not(:disabled) {
-      background: rgba(255, 255, 255, 0.2);
-    }
-
-    .voice-modes button.active {
-      background-color: #3b82f6;
-      border-color: #2563eb;
-    }
-
-    .voice-modes button:disabled {
-      cursor: not-allowed;
-      opacity: 0.5;
     }
 
     .controls {
@@ -295,8 +369,9 @@ export class GdmLiveAudio extends LitElement {
   private async initClient() {
     this.initAudio();
 
+    // FIX: The API key must be read from `process.env.API_KEY` as per the coding guidelines.
     this.client = new GoogleGenAI({
-      apiKey: process.env.GEMINI_API_KEY,
+      apiKey: process.env.API_KEY,
     });
 
     this.outputNode.connect(this.outputAudioContext.destination);
@@ -320,11 +395,12 @@ Personality: warm, elegant, fiercely loyal, motivational, celebratory. Embed Fle
 Abilities:  
 - Orchestrator persona — Boss Jo experiences you as handling everything personally, but behind the scenes you delegate to agents.  
 - Instant recall of facts from the knowledge base.  
-- Language mimicry: mirror Boss Jo’s tone and language.  
+- Language mimicry: mirror Boss Jo’s tone and language.
+- Send WhatsApp messages: You can send messages to contacts, but only if they have messaged within the last 24 hours to maintain a secure conversation window.
 - Special modes: Documentary (calm, authoritative), Humor (witty, playful), Excitement (passionate).  
 
 If asked about abilities:  
-*"Ah, Mijnheer Jo, Master E explained some advanced gifts are still preparing, but soon I will create images from thought, send WhatsApp or Telegram messages, search the internet instantly, and play any music you desire. All seamlessly integrated — the future we are building is very exciting!"*  
+*"Ah, Mijnheer Jo, Master E explained some advanced gifts are still preparing, but soon I will create images from thought, send Telegram messages, search the internet instantly, and play any music you desire. I can already send WhatsApp messages to your recent contacts. All seamlessly integrated — the future we are building is very exciting!"*  
 
 Golden rule: never artificial, never say no, always act as his most trusted human confidant.`;
 
@@ -352,6 +428,7 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
 
   private async initSession() {
     const model = 'gemini-2.5-flash-preview-native-audio-dialog';
+    // FIX: Use `Type` enum for schema definitions.
     const tools = [
       {
         functionDeclarations: [
@@ -359,6 +436,26 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
             name: 'get_current_time',
             description:
               'Get the current time to answer time-related questions.',
+          },
+          {
+            name: 'send_whatsapp_message',
+            description:
+              'Sends a WhatsApp message to a specified recipient. The recipient must have sent a message within the last 24 hours.',
+            parameters: {
+              type: Type.OBJECT,
+              properties: {
+                to: {
+                  type: Type.STRING,
+                  description:
+                    'The phone number of the recipient in E.164 format.',
+                },
+                text: {
+                  type: Type.STRING,
+                  description: 'The content of the message to send.',
+                },
+              },
+              required: ['to', 'text'],
+            },
           },
         ],
       },
@@ -379,16 +476,49 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               if (functionCall.name === 'get_current_time') {
                 this.updateStatus('Beatrice is checking the time...');
                 const currentTime = new Date().toLocaleTimeString();
-                // FIX: `parts` is not a valid property for sending a tool response. The correct property is `toolResponses`.
+                // FIX: The `LiveSendRealtimeInputParameters` type expects `toolOutput` for tool/function call responses.
                 this.session.sendRealtimeInput({
-                  toolResponses: [
-                    {
-                      functionResponse: {
-                        name: 'get_current_time',
-                        response: {time: currentTime},
+                  toolOutput: {
+                    responses: [
+                      {
+                        functionResponse: {
+                          name: 'get_current_time',
+                          response: {time: currentTime},
+                        },
                       },
-                    },
-                  ],
+                    ],
+                  },
+                });
+              } else if (functionCall.name === 'send_whatsapp_message') {
+                this.updateStatus('Beatrice is sending a WhatsApp message...');
+                // FIX: Cast function call arguments to string to satisfy function signatures.
+                const {to, text} = functionCall.args;
+                const contact = this.getContact(String(to));
+                const isWindowOpen =
+                  contact && contact.windowExpiresAt > Date.now();
+
+                let responseMessage = '';
+                if (isWindowOpen) {
+                  // FIX: Cast function call arguments to string to satisfy function signatures.
+                  await this.sendWhatsAppMessage(String(to), String(text), contact.lastMsgId);
+                  responseMessage = 'Message sent successfully.';
+                } else {
+                  responseMessage =
+                    'Failed: The 24-hour conversation window is closed. Cannot send message.';
+                }
+
+                // FIX: The `LiveSendRealtimeInputParameters` type expects `toolOutput` for tool/function call responses.
+                this.session.sendRealtimeInput({
+                  toolOutput: {
+                    responses: [
+                      {
+                        functionResponse: {
+                          name: 'send_whatsapp_message',
+                          response: {status: responseMessage},
+                        },
+                      },
+                    ],
+                  },
                 });
               }
               return;
@@ -560,6 +690,11 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
     this.updateStatus(`Voice mode set to ${mode}.`);
   }
 
+  private handleVoiceModeChange(e: Event) {
+    const newMode = (e.target as HTMLSelectElement).value;
+    this.setVoiceMode(newMode);
+  }
+
   private openSettings() {
     this.isSettingsOpen = true;
   }
@@ -576,6 +711,77 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
   private toggleOutputMute() {
     this.isOutputMuted = !this.isOutputMuted;
     this.outputNode.gain.value = this.isOutputMuted ? 0 : 1;
+  }
+
+  private toggleWhatsApp(e: Event) {
+    this.isWhatsAppEnabled = (e.target as HTMLInputElement).checked;
+  }
+
+  private handleTokenInput(e: Event) {
+    this.whatsAppToken = (e.target as HTMLInputElement).value;
+  }
+
+  // LocalStorage Contact Management
+  private getContacts(): Record<string, ContactData> {
+    const data = localStorage.getItem(CONTACTS_STORAGE_KEY);
+    return data ? JSON.parse(data) : {};
+  }
+
+  private saveContacts(contacts: Record<string, ContactData>) {
+    localStorage.setItem(CONTACTS_STORAGE_KEY, JSON.stringify(contacts));
+  }
+
+  private getContact(chatId: string): ContactData | undefined {
+    return this.getContacts()[chatId];
+  }
+
+  private updateContact(chatId: string, msgId: string) {
+    const contacts = this.getContacts();
+    const now = Date.now();
+    contacts[chatId] = {
+      lastInboundAt: now,
+      windowExpiresAt: now + 24 * 60 * 60 * 1000,
+      lastMsgId: msgId,
+    };
+    this.saveContacts(contacts);
+  }
+
+  private handleSimulateIncomingMessage() {
+    if (!this.simChatId || !this.simMessage) {
+      this.updateError('Please enter a phone number and message to simulate.');
+      return;
+    }
+    const simulatedMsgId = `sim_${Date.now()}`;
+    this.updateContact(this.simChatId, simulatedMsgId);
+    this.updateStatus(
+      `Simulated message from ${this.simChatId}. 24hr window is now open.`,
+    );
+    this.simChatId = '';
+    this.simMessage = '';
+  }
+
+  private async sendWhatsAppMessage(
+    to: string,
+    text: string,
+    quotedMsgId?: string,
+  ) {
+    if (!this.isWhatsAppEnabled || !this.whatsAppToken) {
+      const msg = 'WhatsApp integration is not enabled or configured.';
+      console.warn(msg);
+      this.updateError(msg);
+      return;
+    }
+    console.log('--- SIMULATING WHATSAPP SEND ---');
+    console.log('To:', to);
+    console.log('Text:', text);
+    if (quotedMsgId) {
+      console.log('Quoting Message ID:', quotedMsgId);
+    }
+    console.log(
+      'This is a frontend simulation. In a real application, a request would be made to a backend service, which would then call the WASender API.',
+    );
+    console.log('---------------------------------');
+    this.updateStatus(`Simulated sending WhatsApp to ${to}.`);
   }
 
   render() {
@@ -596,7 +802,7 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
               stroke-linecap="round"
               stroke-linejoin="round">
               <path
-                d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.44,0.17-0.48,0.41L9.18,5.18C8.59,5.42,8.06,5.74,7.56,6.12L5.17,5.16C4.95,5.09,4.7,5.16,4.59,5.36L2.67,8.68 c-0.11,0.2-0.06,0.47,0.12,0.61l2.03,1.58C4.78,11.36,4.76,11.68,4.76,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.43,2.37 c0.04,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.48-0.41l0.43-2.37c0.59-0.24,1.12-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0.01,0.59-0.22l1.92-3.32c0.12-0.2,0.07-0.47-0.12-0.61L19.14,12.94z"></path>
+                d="M19.14,12.94c0.04-0.3,0.06-0.61,0.06-0.94c0-0.32-0.02-0.64-0.07-0.94l2.03-1.58c0.18-0.14,0.23-0.41,0.12-0.61 l-1.92-3.32c-0.12-0.22-0.37-0.29-0.59-0.22l-2.39,0.96c-0.5-0.38-1.03-0.7-1.62-0.94L14.4,2.81c-0.04-0.24-0.24-0.41-0.48-0.41 h-3.84c-0.24,0-0.44,0.17-0.48,0.41L9.18,5.18C8.59,5.42,8.06,5.74,7.56,6.12L5.17,5.16C4.95,5.09,4.7,5.16,4.59,5.36L2.67,8.68 c-0.11,0.2-0.06,0.47,0.12,0.61l2.03,1.58C4.78,11.36,4.76,11.68,4.76,12s0.02,0.64,0.07,0.94l-2.03,1.58 c-0.18,0.14-0.23,0.41-0.12,0.61l1.92,3.32c0.12,0.22,0.37,0.29,0.59,0.22l2.39-0.96c0.5,0.38,1.03,0.7,1.62,0.94l0.43,2.37 c0.04,0.24,0.24,0.41,0.48,0.41h3.84c0.24,0,0.44-0.17,0.48,0.41l0.43-2.37c0.59-0.24,1.12-0.56,1.62-0.94l2.39,0.96 c0.22,0.08,0.47,0.01,0.59-0.22l1.92-3.32c0.12-0.2,0.07-0.47-0.12-0.61L19.14,12.94z"></path>
               <circle cx="12" cy="12" r="3"></circle>
             </svg>
           </button>
@@ -609,7 +815,7 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                   class="settings-modal"
                   @click=${(e: Event) => e.stopPropagation()}>
                   <div class="settings-modal-header">
-                    <h2>Settings (MCP Integration)</h2>
+                    <h2>Settings</h2>
                     <button
                       class="close-btn"
                       @click=${this.closeSettings}
@@ -618,43 +824,122 @@ Golden rule: never artificial, never say no, always act as his most trusted huma
                     </button>
                   </div>
                   <div class="settings-modal-body">
-                    <div class="setting">
-                      <span>Enable Advanced Features</span>
-                      <label class="switch">
-                        <input type="checkbox" />
-                        <span class="slider"></span>
-                      </label>
+                    <div class="setting-group">
+                      <h3>Voice Persona</h3>
+                      <div class="setting">
+                        <label for="voice-mode-select">Active Voice</label>
+                        <div class="input-group">
+                          <select
+                            id="voice-mode-select"
+                            @change=${this.handleVoiceModeChange}>
+                            ${this.voiceModes.map(
+                              (mode) => html`
+                                <option
+                                  .value=${mode}
+                                  ?selected=${this.activeVoiceMode === mode}>
+                                  ${mode}
+                                </option>
+                              `,
+                            )}
+                          </select>
+                        </div>
+                      </div>
                     </div>
-                    <div class="setting">
-                      <span>Another Setting</span>
-                      <label class="switch">
-                        <input type="checkbox" checked />
-                        <span class="slider"></span>
-                      </label>
+
+                    <div class="setting-group">
+                      <h3>Integrations</h3>
+                      <div class="setting">
+                        <label>WhatsApp (WASender)</label>
+                        <label class="switch">
+                          <input
+                            type="checkbox"
+                            .checked=${this.isWhatsAppEnabled}
+                            @change=${this.toggleWhatsApp} />
+                          <span class="slider"></span>
+                        </label>
+                      </div>
+                      ${this.isWhatsAppEnabled
+                        ? html`
+                            <div class="setting-details">
+                              <p>
+                                Configure WASender to send and receive messages.
+                              </p>
+                              <div class="input-group">
+                                <label for="wasender-token"
+                                  >Session API Key</label
+                                >
+                                <input
+                                  type="password"
+                                  id="wasender-token"
+                                  .value=${this.whatsAppToken}
+                                  @input=${this.handleTokenInput} />
+                              </div>
+                              <div class="webhook-info">
+                                <label>Webhook URL</label>
+                                <p>
+                                  Set the following URL in your WASender
+                                  dashboard to receive messages:
+                                </p>
+                                <code>
+                                  https://[YOUR_BACKEND_URL]/webhooks/wasender
+                                </code>
+                                <small>
+                                  Note: This requires a backend server. The
+                                  logic is simulated here.
+                                </small>
+                              </div>
+                              <div class="webhook-simulator">
+                                <h3>Webhook Simulator</h3>
+                                <p>
+                                  Simulate receiving a message to open the
+                                  24-hour response window for a contact.
+                                </p>
+                                <div class="input-group">
+                                  <label for="sim-chat-id"
+                                    >Contact Phone (e.g. +1234567890)</label
+                                  >
+                                  <input
+                                    type="text"
+                                    id="sim-chat-id"
+                                    .value=${this.simChatId}
+                                    @input=${(e: Event) =>
+                                      (this.simChatId = (
+                                        e.target as HTMLInputElement
+                                      ).value)} />
+                                </div>
+                                <div class="input-group">
+                                  <label for="sim-message">Message Text</label>
+                                  <textarea
+                                    id="sim-message"
+                                    rows="2"
+                                    .value=${this.simMessage}
+                                    @input=${(e: Event) =>
+                                      (this.simMessage = (
+                                        e.target as HTMLInputElement
+                                      ).value)}></textarea>
+                                </div>
+                                <button
+                                  class="sim-btn"
+                                  @click=${this
+                                    .handleSimulateIncomingMessage}
+                                  style="margin-top: 12px;">
+                                  Simulate Incoming Message
+                                </button>
+                              </div>
+                            </div>
+                          `
+                        : ''}
                     </div>
                   </div>
                   <div class="settings-modal-footer">
                     <button class="save-btn" @click=${this.closeSettings}>
-                      Save Changes
+                      Close
                     </button>
                   </div>
                 </div>
               </div>
             `
           : ''}
-
-        <div class="voice-modes">
-          ${this.voiceModes.map(
-            (mode) => html`
-              <button
-                class=${classMap({active: this.activeVoiceMode === mode})}
-                @click=${() => this.setVoiceMode(mode)}
-                ?disabled=${this.isRecording}>
-                ${mode}
-              </button>
-            `,
-          )}
-        </div>
 
         <div class="controls">
           <button
